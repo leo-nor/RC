@@ -21,11 +21,47 @@ volatile int STOP = FALSE, ERROR = FALSE;
 
 int flag=1, timeout=1, trama_num = 1;
 
+unsigned char *fileName, *fileData;
+off_t fileSize;
+
 void atende() {
 	printf("alarme # %d\n", timeout);
 	flag=1;
 	timeout++;
   ERROR = TRUE;
+}
+
+void registerFileData() {
+  FILE *file;
+  struct stat st;
+
+  if((file = fopen(fileName, "r")) == NULL) {
+    errorMsg("Failed to open file!");
+    exit(-1);
+  }
+  rewind(file);
+  if(stat(fileName, &st) == -1) {
+    errorMsg("Failed to get file's metadata!");
+    exit(-1);
+  }
+  fileSize = st.st_size;
+  fileData = (unsigned char *) malloc(fileSize);
+  if(fread(fileData, sizeof(unsigned char), fileSize, file) < fileSize) {
+    errorMsg("Failed to read file's data!");
+    exit(-1);
+  }
+}
+
+unsigned char *createControlPacket(unsigned char type) {
+  unsigned char *packet = (unsigned char *) malloc (5 + sizeof(fileSize) + strlen(fileName));
+
+  packet[0] = type;
+  packet[1] = 0x00; //Represents file size area
+  packet[2] = sizeof(fileSize);
+  for(int i = 0; i < sizeof(fileSize); i++) {
+    packet[i + 3] = (fileSize >> (8*(sizeof(fileSize)-1-i)));
+    printf("%s\n", packet[i+3]);
+  }
 }
 
 int main(int argc, char** argv) {
@@ -80,9 +116,9 @@ int main(int argc, char** argv) {
   printf("New termios structure set\n");
 
   while(timeout <= RETRY_ATTEMPTS) {
-    send_SET(fd);
+    //send_SET(fd);
     
-    alarm(3);
+    alarm(TIMEOUT_TIME);
 
     char new_buf[255];
     int counter = 0;
@@ -118,7 +154,7 @@ int main(int argc, char** argv) {
     }
   }
 
-  if(timeout > RETRY_ATTEMPTS) printf("Failed to receive UA response\n");
+  if(timeout > RETRY_ATTEMPTS) errorMsg("Failed to receive UA response!");
   else printf("UA received successfully\n");
 
   /*
