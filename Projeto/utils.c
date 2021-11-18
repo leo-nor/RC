@@ -45,16 +45,4 @@ unsigned char * create_trama_S(char C, char SEND, int trama_num) {
 int send_trama_S(int fd, char C, char SEND, int trama_num) {
   if(write(fd, create_trama_S(C, SEND, trama_num), 5) >= 0) return TRUE;
   else return FALSE;
-
-  switch (C) {
-  case SET:
-    printf("SET command sent\n");
-    break;
-  case UA:
-    printf("UA response sent\n");
-    break;
-  case DISC:
-    printf("DISC command sent\n");
-    break;
-  }
 }

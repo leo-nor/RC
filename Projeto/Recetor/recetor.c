@@ -1,33 +1,25 @@
-/*Non-Canonical Input Processing*/
+#include "recetor.h"
 
-#include <sys/types.h>
-#include <sys/stat.h>
-#include <fcntl.h>
-#include <termios.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <unistd.h>
-
-#include "../utils.c"
-
-#define CMD_SEND 0x01
-#define RES_SEND 0x03
-#define CMD_REC 0x03
-#define RES_REC 0x01
+struct termios oldtio,newtio;
 
 volatile int STOP = FALSE, ERROR = FALSE;
 
-int trama_num = 1;
+int flag = 1, timeout = 1, trama_num = 1;
+
+void takeAlarm() {
+	printf("alarm # %d\n", timeout);
+	flag=1;
+	timeout++;
+  ERROR = TRUE;
+}
 
 int main(int argc, char** argv) {
   int fd;
-  struct termios oldtio,newtio;
 
   if ( (argc < 2) ||
-        ((strcmp("/dev/ttyS0", argv[1])!=0) &&
-        (strcmp("/dev/ttyS1", argv[1])!=0) )) {
-    printf("Usage:\tnserial SerialPort\n\tex: nserial /dev/ttyS11\n");
+        ((strcmp("/dev/ttyS10", argv[1])!=0) &&
+        (strcmp("/dev/ttyS11", argv[1])!=0) )) {
+    printf("Usage:\tSerialPort\n\tex: /dev/ttyS1\n");
     exit(1);
   }
 
@@ -39,6 +31,23 @@ int main(int argc, char** argv) {
   fd = open(argv[1], O_RDWR | O_NOCTTY );
   if (fd <0) {perror(argv[1]); exit(-1); }
 
+  (void) signal(SIGALRM, takeAlarm);
+
+  if(llopen(fd, RECEIVER) == -1) {
+		errorMsg("llopen() falhou!");
+		return -1;
+	}
+
+  if ( tcsetattr(fd,TCSANOW,&oldtio) == -1) {
+		perror("tcsetattr");
+		exit(-1);
+	}
+
+	close(fd);
+  return 0;
+}
+
+int llopen(int fd, int flag) {
   if ( tcgetattr(fd,&oldtio) == -1) { /* save current port settings */
     perror("tcgetattr");
     exit(-1);
@@ -52,8 +61,8 @@ int main(int argc, char** argv) {
   /* set input mode (non-canonical, no echo,...) */
   newtio.c_lflag = 0;
 
-  newtio.c_cc[VTIME]    = 5;   /* inter-character timer unused */
-  newtio.c_cc[VMIN]     = 1;   /* blocking read until 5 chars received */
+  newtio.c_cc[VTIME]    = 30;   /* inter-character timer unused */
+  newtio.c_cc[VMIN]     = 0;   /* blocking read until 5 chars received */
 
   /*
     VTIME e VMIN devem ser alterados de forma a proteger com um temporizador a
@@ -95,14 +104,14 @@ int main(int argc, char** argv) {
     else counter++;
   }
 
-  if(ERROR == TRUE) printf("Command received is not a SET\n");
-  else send_UA(fd);
+  if(ERROR == TRUE) errorMsg("Failed to receive SET command!");
+  else {
+    printf("SET received successfully\n");
+    if(send_trama_S(fd, UA, RES_SEND, trama_num))
+      printf("UA response sent\n");
+    else
+      errorMsg("Failed to send UA response!");
+  }
 
-  /*
-    O ciclo WHILE deve ser alterado de modo a respeitar o indicado no gui�o
-  */
-
-  tcsetattr(fd,TCSANOW,&oldtio);
-  close(fd);
   return 0;
 }

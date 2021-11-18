@@ -1,21 +1,6 @@
-/*Non-Canonical Input Processing*/
+#include "emissor.h"
 
-#include <sys/types.h>
-#include <sys/stat.h>
-#include <fcntl.h>
-#include <termios.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <signal.h>
-#include <unistd.h>
-
-#include "../utils.c"
-
-#define CMD_SEND 0x03
-#define RES_SEND 0x01
-#define CMD_REC 0x01
-#define RES_REC 0x03
+struct termios oldtio, newtio;
 
 volatile int STOP = FALSE, ERROR = FALSE;
 
@@ -24,56 +9,23 @@ int flag=1, timeout=1, trama_num = 1;
 unsigned char *fileName, *fileData;
 off_t fileSize;
 
-void atende() {
-	printf("alarme # %d\n", timeout);
+void takeAlarm() {
+	printf("alarm # %d\n", timeout);
 	flag=1;
 	timeout++;
   ERROR = TRUE;
 }
 
-void registerFileData() {
-  FILE *file;
-  struct stat st;
-
-  if((file = fopen(fileName, "r")) == NULL) {
-    errorMsg("Failed to open file!");
-    exit(-1);
-  }
-  rewind(file);
-  if(stat(fileName, &st) == -1) {
-    errorMsg("Failed to get file's metadata!");
-    exit(-1);
-  }
-  fileSize = st.st_size;
-  fileData = (unsigned char *) malloc(fileSize);
-  if(fread(fileData, sizeof(unsigned char), fileSize, file) < fileSize) {
-    errorMsg("Failed to read file's data!");
-    exit(-1);
-  }
-}
-
-unsigned char *createControlPacket(unsigned char type) {
-  unsigned char *packet = (unsigned char *) malloc (5 + sizeof(fileSize) + strlen(fileName));
-
-  packet[0] = type;
-  packet[1] = 0x00; //Represents file size area
-  packet[2] = sizeof(fileSize);
-  for(int i = 0; i < sizeof(fileSize); i++) {
-    packet[i + 3] = (fileSize >> (8*(sizeof(fileSize)-1-i)));
-    printf("%s\n", packet[i+3]);
-  }
-}
-
 int main(int argc, char** argv) {
-  (void) signal(SIGALRM, atende);
+	struct timespec start, finish;
+	clock_gettime(CLOCK_REALTIME, &start);
 
   int fd;
-  struct termios oldtio,newtio;
 
-  if ( (argc < 2) ||
-        ((strcmp("/dev/ttyS0", argv[1])!=0) &&
-        (strcmp("/dev/ttyS1", argv[1])!=0) )) {
-    printf("Usage:\tnserial SerialPort\n\tex: nserial /dev/ttyS1\n");
+  if ( (argc < 3) ||
+        ((strcmp("/dev/ttyS10", argv[1])!=0) &&
+        (strcmp("/dev/ttyS11", argv[1])!=0) )) {
+    printf("Usage:\tSerialPort filename\n\tex: /dev/ttyS1 pinguim.gif\n");
     exit(1);
   }
 
@@ -85,6 +37,35 @@ int main(int argc, char** argv) {
   fd = open(argv[1], O_RDWR | O_NOCTTY );
   if (fd <0) {perror(argv[1]); exit(-1); }
 
+	registerFileData(argv[2]);
+
+  (void) signal(SIGALRM, takeAlarm);
+
+	if(llopen(fd, TRANSMITTER) == -1) {
+		errorMsg("llopen() falhou!");
+		return -1;
+	}
+
+	if(llwrite(fd) == -1) {
+		errorMsg("llwrite() falhou!");
+		return -1;
+	}
+
+	clock_gettime(CLOCK_REALTIME, &finish);
+	double time_taken = (finish.tv_sec - start.tv_sec) + (finish.tv_nsec - start.tv_nsec) / 1E9;
+
+	printf("Tempo utilizado pelo programa: %f segundos\n", time_taken);
+
+	if ( tcsetattr(fd,TCSANOW,&oldtio) == -1) {
+		perror("tcsetattr");
+		exit(-1);
+	}
+
+	close(fd);
+	return 0;
+}
+
+int llopen(int fd, int flag) {
   if ( tcgetattr(fd,&oldtio) == -1) { /* save current port settings */
     perror("tcgetattr");
     exit(-1);
@@ -116,8 +97,11 @@ int main(int argc, char** argv) {
   printf("New termios structure set\n");
 
   while(timeout <= RETRY_ATTEMPTS) {
-    //send_SET(fd);
-    
+    if(send_trama_S(fd, SET, CMD_SEND, trama_num))
+			printf("SET command sent\n");
+		else
+			errorMsg("Failed to send SET command!");
+
     alarm(TIMEOUT_TIME);
 
     char new_buf[255];
@@ -157,16 +141,45 @@ int main(int argc, char** argv) {
   if(timeout > RETRY_ATTEMPTS) errorMsg("Failed to receive UA response!");
   else printf("UA received successfully\n");
 
-  /*
-    O ciclo FOR e as instru��es seguintes devem ser alterados de modo a respeitar
-    o indicado no gui�o
-  */
+  return 0;
+}
 
-  if ( tcsetattr(fd,TCSANOW,&oldtio) == -1) {
-    perror("tcsetattr");
+int llwrite(int fd) {
+	return 0;
+}
+
+unsigned char *createControlPacket(unsigned char type) {
+  unsigned char *packet = (unsigned char *) malloc (5 + sizeof(fileSize) + strlen(fileName));
+
+  packet[0] = type;
+  packet[1] = 0x00; //Represents filesize area
+  packet[2] = sizeof(fileSize);
+  for(int i = 0; i < sizeof(fileSize); i++)
+    packet[i + 3] = (fileSize >> (8*(sizeof(fileSize)-1-i)));
+  packet[3 + sizeof(fileSize)] = 0x01; //Represents filename area
+  packet[3 + sizeof(fileSize) + 1] = strlen(fileName);
+	for (int j = 0; j < strlen(fileName); j++)
+		packet[5 + sizeof(fileSize) + j] = fileName[j];
+}
+
+void registerFileData(unsigned char *fname) {
+	fileName = fname;
+  FILE *file;
+  struct stat st;
+
+  if((file = fopen(fileName, "r")) == NULL) {
+    errorMsg("Failed to open file!");
     exit(-1);
   }
-
-  close(fd);
-  return 0;
+  rewind(file);
+  if(stat(fileName, &st) == -1) {
+    errorMsg("Failed to get file's metadata!");
+    exit(-1);
+  }
+  fileSize = st.st_size;
+  fileData = (unsigned char *) malloc(fileSize);
+  if(fread(fileData, sizeof(unsigned char), fileSize, file) < fileSize) {
+    errorMsg("Failed to read file's data!");
+    exit(-1);
+  }
 }
