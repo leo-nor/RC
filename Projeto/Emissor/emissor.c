@@ -4,7 +4,7 @@ struct termios oldtio, newtio;
 
 volatile int STOP = FALSE, ERROR = FALSE;
 
-int flag=1, timeout=1, trama_num = 1;
+int flag=1, timeout=1, trama_num = 1, state = CONTROLSTART;
 
 unsigned char *fileName, *fileData;
 off_t fileSize;
@@ -46,9 +46,13 @@ int main(int argc, char** argv) {
 		return -1;
 	}
 
-	if(llwrite(fd) == -1) {
-		errorMsg("llwrite() falhou!");
-		return -1;
+	switch (state) {
+		case CONTROLSTART:
+			if(llwrite(fd, create_trama_I(START, CMD_SEND), 6 + 5 + sizeof(fileSize) + strlen(fileName)) == -1) {
+				errorMsg("llwrite() falhou!");
+				return -1;
+			}
+			// RECEBER RR OU REJ
 	}
 
 	clock_gettime(CLOCK_REALTIME, &finish);
@@ -138,18 +142,48 @@ int llopen(int fd, int flag) {
     }
   }
 
-  if(timeout > RETRY_ATTEMPTS) errorMsg("Failed to receive UA response!");
-  else printf("UA received successfully\n");
-
-  return 0;
+  if(timeout > RETRY_ATTEMPTS) {
+		errorMsg("Failed to receive UA response!");
+		return -1;
+	} else {
+		printf("UA received successfully\n");
+		return fd;
+	}
 }
 
-int llwrite(int fd) {
-	return 0;
+int llwrite(int fd, char *buf, int length) {
+	switch (state) {
+		case CONTROLSTART:
+			return send_trama_I(fd, buf, length);
+	}
+	return -1;
+}
+
+unsigned char * create_trama_I(unsigned char type, char SEND) {
+	unsigned char *packet = createControlPacket(type);
+	unsigned char BCC2 = 0x00;
+  unsigned char *buf = (unsigned char *) malloc(6 + 5 + sizeof(fileSize) + strlen(fileName));
+
+  buf[0] = FLAG;
+  buf[1] = SEND;
+  buf[2] = get_Ns(trama_num) << 6;
+  buf[3] = SEND ^ (get_Ns(trama_num) << 6);
+	memmove(buf + 4, packet, 5 + sizeof(fileSize) + strlen(fileName));
+	for(int i = 0; i < 5 + sizeof(fileSize) + strlen(fileName); i++)
+		BCC2 ^= packet[i];
+	buf[4 + 5 + sizeof(fileSize) + strlen(fileName)] = BCC2;
+	buf[4 + 5 + sizeof(fileSize) + strlen(fileName) + 1] = FLAG;
+
+  return buf;
+}
+
+int send_trama_I(int fd, char *buf, int length) {
+  if(write(fd, buf, length) >= 0) return length;
+  else return FALSE;
 }
 
 unsigned char *createControlPacket(unsigned char type) {
-  unsigned char *packet = (unsigned char *) malloc (5 + sizeof(fileSize) + strlen(fileName));
+  unsigned char *packet = (unsigned char *) malloc(5 + sizeof(fileSize) + strlen(fileName));
 
   packet[0] = type;
   packet[1] = 0x00; //Represents filesize area
@@ -160,6 +194,8 @@ unsigned char *createControlPacket(unsigned char type) {
   packet[3 + sizeof(fileSize) + 1] = strlen(fileName);
 	for (int j = 0; j < strlen(fileName); j++)
 		packet[5 + sizeof(fileSize) + j] = fileName[j];
+
+		return packet;
 }
 
 void registerFileData(unsigned char *fname) {

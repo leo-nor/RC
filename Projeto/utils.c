@@ -15,6 +15,10 @@
 #define ESCAPED_FLAG 0x5E
 #define ESCAPED_ESCAPE 0x5D
 
+#define CONTROLDATA 0x01
+#define CONTROLSTART 0x02
+#define CONTROLEND 0x03
+
 void errorMsg(char* err) {
   printf("O programa falhou: %s\n", err);
 }

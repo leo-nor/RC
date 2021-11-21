@@ -25,8 +25,12 @@ void takeAlarm();
 
 void registerFileData(unsigned char *fname);
 
+unsigned char * create_trama_I(unsigned char type, char SEND);
+
+int send_trama_I(int fd, char *buf, int length);
+
 unsigned char *createControlPacket(unsigned char type);
 
 int llopen(int fd, int flag);
 
-int llwrite(int fd);
+int llwrite(int fd, char *buf, int length);

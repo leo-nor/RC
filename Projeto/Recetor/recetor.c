@@ -6,6 +6,9 @@ volatile int STOP = FALSE, ERROR = FALSE;
 
 int flag = 1, timeout = 1, trama_num = 1;
 
+unsigned char *fileName, *fileData;
+off_t fileSize;
+
 void takeAlarm() {
 	printf("alarm # %d\n", timeout);
 	flag=1;
@@ -34,6 +37,12 @@ int main(int argc, char** argv) {
   (void) signal(SIGALRM, takeAlarm);
 
   if(llopen(fd, RECEIVER) == -1) {
+		errorMsg("llopen() falhou!");
+		return -1;
+	}
+
+	char buf[255];
+  if(llread(fd, buf) == -1) {
 		errorMsg("llopen() falhou!");
 		return -1;
 	}
@@ -78,11 +87,11 @@ int llopen(int fd, int flag) {
 
   printf("New termios structure set\n");
 
-  char buf[255];
+  unsigned char buf[255];
   int counter = 0;
 
   while (STOP==FALSE && ERROR==FALSE) {
-    read(fd, buf + counter, 1);   /* returns after 5 chars have been input */
+    read(fd, buf + counter, 1);
     switch (counter) {
       case 0:
         if(buf[0] != FLAG) ERROR = TRUE;
@@ -104,14 +113,117 @@ int llopen(int fd, int flag) {
     else counter++;
   }
 
-  if(ERROR == TRUE) errorMsg("Failed to receive SET command!");
-  else {
+	if(ERROR == TRUE) {
+		errorMsg("Failed to receive SET command!");
+		return -1;
+  } else {
     printf("SET received successfully\n");
     if(send_trama_S(fd, UA, RES_SEND, trama_num))
       printf("UA response sent\n");
     else
       errorMsg("Failed to send UA response!");
+		return fd;
   }
+}
 
-  return 0;
+int llread(int fd, unsigned char *buf) {
+	STOP = FALSE, ERROR = FALSE;
+  int counter = -1, parametro = 0, packetIsData = FALSE, packetIsRead = FALSE;
+	int fileNameSize = 0, fileSizeSize = 0;
+	unsigned char BCC2 = 0x00;
+
+  while (STOP==FALSE && ERROR==FALSE) {
+		counter++;
+    read(fd, buf + counter, 1);
+    switch (counter) {
+      case 0:
+        if(buf[0] != FLAG) ERROR = TRUE;
+        break;
+      case 1:
+        if(buf[1] != CMD_REC) ERROR = TRUE;
+        break;
+      case 2:
+        if(buf[2] != get_Ns(trama_num) << 6) ERROR = TRUE;
+        break;
+      case 3:
+        if(buf[3] != (CMD_REC^get_Ns(trama_num) << 6)) ERROR = TRUE;
+        break;
+			case 4:
+				if(buf[4] == CONTROLDATA) packetIsData = TRUE;
+				break;
+    }
+    if(counter >= 5) {
+			if(packetIsRead) {
+				for(int i = 4; i < counter; i++)
+					BCC2 ^= buf[i];
+				if(buf[counter] != BCC2) ERROR = TRUE;
+				else {
+					counter++;
+			    read(fd, buf + counter, 1);
+					if(buf[counter] != FLAG) ERROR = TRUE;
+					else STOP = TRUE;
+				}
+			} else {
+				if(packetIsData) {
+
+				} else {
+					switch (parametro) {
+						case 0:
+							if(buf[counter] == 0x00) parametro++;
+							else ERROR = TRUE;
+							break;
+						case 1:
+							fileSizeSize = buf[counter];
+							parametro++;
+							break;
+						case 2:
+							for(int i = 0; i < fileSizeSize; i++) {
+								fileSize = fileSize | (buf[counter] << (8*((fileSizeSize-i)-1)));
+								if(!(i == fileSizeSize-1)) {
+									counter++;
+									read(fd, buf + counter, 1);
+								}
+							}
+							parametro++;
+							break;
+						case 3:
+							if(buf[counter] == 0x01) parametro++;
+							else ERROR = TRUE;
+							break;
+						case 4:
+							fileName = (unsigned char *) malloc(buf[counter]);
+							fileNameSize = buf[counter];
+							parametro++;
+							break;
+						case 5:
+							for(int i = 0; i < fileNameSize; i++) {
+								fileName[i] = buf[counter];
+								if(!(i == fileNameSize-1)) {
+									counter++;
+									read(fd, buf + counter, 1);
+								}
+							}
+							parametro = 0;
+							packetIsRead = TRUE;
+							break;
+					}
+				}
+			}
+		}
+	}
+
+	if(ERROR == TRUE) {
+		if(send_trama_S(fd, REJ, RES_SEND, trama_num))
+			printf("REJ response sent\n");
+	  else
+			errorMsg("Failed to send REJ response!");
+			return -1;
+	} else {
+	  printf("DATA received successfully\n");
+	  if(send_trama_S(fd, RR, RES_SEND, trama_num))
+	    printf("RR response sent\n");
+	  else
+			errorMsg("Failed to send RR response!");
+			return counter;
+	}
 }
