@@ -65,7 +65,6 @@ int send_trama_S(int fd, unsigned char SENDER, unsigned char C, unsigned char SE
   unsigned char *buf = create_trama_S(SENDER, C, SEND, trama_num);
   //for(int i = 0; i < 5; i++)
     //printf("wtf %i\n", buf[i]);
-    if(trama_num == 2) if(write(fd, buf, 5) >= 0) exit(0);
   if(write(fd, buf, 5) >= 0) return TRUE;
   else return FALSE;
 }

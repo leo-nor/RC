@@ -22,8 +22,8 @@ int main(int argc, char** argv) {
   int fd;
 
   if ( (argc < 2) ||
-        ((strcmp("/dev/ttyS10", argv[1])!=0) &&
-        (strcmp("/dev/ttyS11", argv[1])!=0) )) {
+        ((strcmp("/dev/ttyS0", argv[1])!=0) &&
+        (strcmp("/dev/ttyS1", argv[1])!=0) )) {
     printf("Usage:\tSerialPort\n\tex: /dev/ttyS1\n");
     exit(1);
   }
@@ -46,28 +46,37 @@ int main(int argc, char** argv) {
 	while(!allFinished) {
 		switch (state) {
 			case CONTROLSTART: {
-				unsigned char buf[255];
+				unsigned char *buf = malloc(5);
 				if(llread(fd, buf) == -1) {
 					errorMsg("Failed to receive valid CONTROLSTART!");
 					return -1;
 				} else state = CONTROLDATA;
+				free(buf);
 			}
 			case CONTROLDATA: {
-				unsigned char buf[255];
+							printf("%s\n", fileName);
+				unsigned char *buf = malloc(5);
 				if(llread(fd, buf) == -1) {
-					errorMsg("Failed to receive valid CONTROLDATA!"); // A PRIMEIRA TRAMA ESTÁ A CHEGAR MAL, IMPRIMI LA E VERIFICAR PORQUÊ
+					errorMsg("Failed to receive valid CONTROLDATA!");
 					return -1;
 				} else {
-					if(fileSize % MINK > 0)
+					if(fileSize % MINK > 0) {
 						if(trama_num == ((fileSize / MINK) + 1)) allFinished = TRUE;
-					else
+					} else {
 						if(trama_num == (fileSize / MINK)) allFinished = TRUE;
+					}
 				}
+				printf("LOOK: %i == %li\n", trama_num, (fileSize / MINK) + 1);
+				printf("Finished: %i\n", allFinished);
+				free(buf);
 			}
 		}
 	}
+							printf("%s\n", fileName);
 
-	//printf("GOT HERE\n");
+	printf("GOT HERE\n");
+
+	createFile();
 
   if ( tcsetattr(fd,TCSANOW,&oldtio) == -1) {
 		perror("tcsetattr");
@@ -109,7 +118,7 @@ int llopen(int fd, int flag) {
 
   printf("New termios structure set\n");
 
-  unsigned char buf[255];
+  unsigned char buf[5];
   int counter = 0;
 
   while (STOP==FALSE && ERROR==FALSE) {
@@ -267,7 +276,7 @@ int llread(int fd, unsigned char *buf) {
 							else ERROR = TRUE;
 							break;
 						case 4:
-							fileName = (unsigned char *) malloc(buf[counter]);
+							fileName = (unsigned char *) malloc(buf[counter] + 1);
 							fileNameSize = buf[counter];
 							parametro++;
 							break;
@@ -279,6 +288,8 @@ int llread(int fd, unsigned char *buf) {
 									read(fd, buf + counter, 1);
 								}
 							}
+							fileName[fileNameSize] = '\0';
+							printf("%s\n", fileName);
 							parametro = 0;
 							packetIsRead = TRUE;
 							break;
@@ -297,10 +308,40 @@ int llread(int fd, unsigned char *buf) {
 	} else {
 	  printf("DATA received successfully\n");
 	  if(send_trama_S(fd, RECEIVER, RR, RES_SEND, trama_num)) {
+		printf("Trama: %i\n", trama_num);
 	    printf("RR response sent\n");
-			trama_num++;
+		trama_num++;
+		printf("Last few bytes: \n");
+		printf("%i\n", fileData[10960]);
+		printf("%i\n", fileData[10961]);
+		printf("%i\n", fileData[10962]);
+		printf("%i\n", fileData[10963]);
+		printf("%i\n", fileData[10964]);
+		printf("%i\n", fileData[10965]);
+		printf("%i\n", fileData[10966]);
+		printf("%i\n", fileData[10967]);
+							printf("%s\n", fileName);
 	  } else
 			errorMsg("Failed to send RR response!");
 		return counter;
 	}
+}
+
+void createFile() {
+	FILE *file;
+	file = fopen(fileName, "w");
+
+	printf("asdasdasd\n");
+	printf("%s\n", fileName);
+
+	if(file == NULL) {
+		errorMsg("Unable to create file!");
+		exit(-1);
+	}
+
+	fwrite(fileData, sizeof(unsigned char), fileSize, file);
+
+	fclose(file);
+
+	return;
 }

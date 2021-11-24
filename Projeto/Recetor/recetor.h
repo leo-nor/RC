@@ -19,3 +19,5 @@ void takeAlarm();
 int llopen(int fd, int flag);
 
 int llread(int fd, unsigned char *buf);
+
+void createFile();
