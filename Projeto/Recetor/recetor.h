@@ -9,8 +9,6 @@
 
 #include "../utils.c"
 
-#define RECEIVER 0x02
-
 #define CMD_SEND 0x01
 #define RES_SEND 0x03
 #define CMD_REC 0x03

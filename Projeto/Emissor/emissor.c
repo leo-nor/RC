@@ -6,6 +6,11 @@ volatile int STOP = FALSE, ERROR = FALSE;
 
 int flag=1, timeout=1, trama_num = 1, state = CONTROLSTART;
 
+int allFinished = FALSE;
+
+int lastDataPacketSize = -1;
+unsigned char lastDataPacketBCC2;
+
 unsigned char *fileName, *fileData;
 off_t fileSize;
 
@@ -46,13 +51,149 @@ int main(int argc, char** argv) {
 		return -1;
 	}
 
-	switch (state) {
-		case CONTROLSTART:
-			if(llwrite(fd, create_trama_I(START, CMD_SEND), 6 + 5 + sizeof(fileSize) + strlen(fileName)) == -1) {
-				errorMsg("llwrite() falhou!");
-				return -1;
+	while(!allFinished) {
+		switch (state) {
+			case CONTROLSTART:
+				if(llwrite(fd, create_trama_I(CONTROLSTART, CMD_SEND), 6 + 5 + sizeof(fileSize) + strlen(fileName)) == -1) {
+					errorMsg("llwrite() falhou!");
+					return -1;
+				}
+
+				unsigned char new_buf[255];
+		    int counter = 0;
+				STOP = FALSE, ERROR = FALSE;
+
+		    alarm(TIMEOUT_TIME);
+
+		    while (STOP==FALSE && ERROR==FALSE) {
+		      read(fd, new_buf + counter, 1);
+		      switch (counter) {
+		        case 0:
+		          if(new_buf[0] != FLAG) ERROR = TRUE;
+		          break;
+		        case 1:
+		          if(new_buf[1] != RES_REC) ERROR = TRUE;
+		          break;
+		        case 2:
+		          if(get_Nr(trama_num) == 0) {
+								if(new_buf[2] != RR && new_buf[2] != REJ)
+									ERROR = TRUE;
+							} else {
+								if(new_buf[2] != (RR ^ 0x80) && new_buf[2] != (REJ ^ 0x80))
+									ERROR = TRUE;
+							}
+		          break;
+		        case 3:
+		          if(get_Nr(trama_num) == 0) {
+								if(new_buf[3] != (RES_REC ^ RR) && new_buf[3] != (RES_REC ^ REJ))
+									ERROR = TRUE;
+							} else {
+								if(new_buf[3] != (RES_REC ^ (RR ^ 0x80)) && new_buf[3] != (RES_REC ^ (REJ ^ 0x80)))
+									ERROR = TRUE;
+							}
+							break;
+		        case 4:
+		          if(new_buf[4] != FLAG) ERROR = TRUE;
+		          break;
+		      }
+		      if(counter == 4) STOP = TRUE;
+		      else counter++;
+		    }
+
+		    if(STOP == TRUE) {
+					if(new_buf[2] == REJ || new_buf[2] == (REJ ^ 0x80)) {
+						printf("REJ received, repeating CONTROLSTART\n");
+					} else {
+						printf("RR received successfully\n");
+						state = CONTROLDATA;
+						trama_num++;
+					}
+					timeout = 1;
+				} else {
+					if(timeout > RETRY_ATTEMPTS) {
+			      errorMsg("Failed to receive valid response to CONTROLSTART!");
+						return -1;
+					}
+		    }
+			case CONTROLDATA: {
+				unsigned char *tmp = malloc(lastDataPacketSize + 6);
+				tmp = create_trama_I(CONTROLDATA, CMD_SEND);
+
+				if(llwrite(fd, tmp, lastDataPacketSize + 6) == -1) {
+					errorMsg("llwrite() falhou!");
+					return -1;
+				}
+
+				unsigned char *new_buf = malloc(5);
+		    int counter = 0;
+				STOP = FALSE, ERROR = FALSE;
+
+		    alarm(TIMEOUT_TIME);
+
+		    while (STOP==FALSE && ERROR==FALSE) {
+		      read(fd, new_buf + counter, 1);
+		      switch (counter) {
+		        case 0:
+		          if(new_buf[0] != FLAG) ERROR = TRUE;
+		          break;
+		        case 1:
+		          if(new_buf[1] != RES_REC) ERROR = TRUE;
+		          break;
+		        case 2:
+		          if(get_Nr(trama_num) == 0) {
+								if(new_buf[2] != RR && new_buf[2] != REJ)
+									ERROR = TRUE;
+							} else {
+								if(new_buf[2] != (RR ^ 0x80) && new_buf[2] != (REJ ^ 0x80))
+									ERROR = TRUE;
+							}
+		        case 3:
+							printf("\n\n");
+							printf("Num: %i\n", trama_num);
+							printf("STOP: %i\n", STOP);
+							printf("ERROR: %i\n", ERROR);
+							printf("\n\n");
+		          if(get_Nr(trama_num) == 0) {
+								if(new_buf[3] != (RES_REC ^ RR) && new_buf[3] != (RES_REC ^ REJ))
+									ERROR = TRUE;
+							} else {
+								if(new_buf[3] != (RES_REC ^ (RR ^ 0x80)) && new_buf[3] != (RES_REC ^ (REJ ^ 0x80)))
+									ERROR = TRUE;
+							}
+								printf("\n\n");
+								printf("Num: %i\n", trama_num);
+								printf("STOP: %i\n", STOP);
+								printf("ERROR: %i\n", ERROR);
+								printf("%i != %i\n", new_buf[3], (RES_REC ^ RR));
+								printf("\n\n");
+							break;
+		        case 4:
+		          if(new_buf[4] != FLAG) ERROR = TRUE;
+		          break;
+		      }
+		      if(counter == 4) STOP = TRUE;
+		      else counter++;
+		    }
+				for(int i = 0; i < 5; i++) printf("wtf %i\n", new_buf[i]);
+				printf("BREAK\n");
+
+				if(STOP == TRUE) {
+					if(new_buf[2] == REJ || new_buf[2] == (REJ ^ 0x80)) {
+						printf("REJ received, repeating CONTROLDATA\n");
+					} else {
+						printf("RR received successfully\n");
+						state = CONTROLDATA;
+						trama_num++;
+					}
+					timeout = 1;
+				} else {
+					if(timeout > RETRY_ATTEMPTS) {
+			      errorMsg("Failed to receive valid response to CONTROLDATA!");
+						return -1;
+					}
+		    }
 			}
-			// RECEBER RR OU REJ
+		}
 	}
 
 	clock_gettime(CLOCK_REALTIME, &finish);
@@ -101,18 +242,17 @@ int llopen(int fd, int flag) {
   printf("New termios structure set\n");
 
   while(timeout <= RETRY_ATTEMPTS) {
-    if(send_trama_S(fd, SET, CMD_SEND, trama_num))
+    if(send_trama_S(fd, TRANSMITTER, SET, CMD_SEND, trama_num))
 			printf("SET command sent\n");
 		else
 			errorMsg("Failed to send SET command!");
 
     alarm(TIMEOUT_TIME);
 
-    char new_buf[255];
+    unsigned char new_buf[255];
     int counter = 0;
 
     while (STOP==FALSE && ERROR==FALSE) {
-      flag = 0;
       read(fd, new_buf + counter, 1);
       switch (counter) {
         case 0:
@@ -147,37 +287,50 @@ int llopen(int fd, int flag) {
 		return -1;
 	} else {
 		printf("UA received successfully\n");
+		timeout = 1;
 		return fd;
 	}
 }
 
-int llwrite(int fd, char *buf, int length) {
-	switch (state) {
-		case CONTROLSTART:
-			return send_trama_I(fd, buf, length);
-	}
-	return -1;
+int llwrite(int fd, unsigned char *buf, int length) {
+	return send_trama_I(fd, buf, length);
 }
 
-unsigned char * create_trama_I(unsigned char type, char SEND) {
-	unsigned char *packet = createControlPacket(type);
+unsigned char * create_trama_I(unsigned char type, unsigned char SEND) {
 	unsigned char BCC2 = 0x00;
-  unsigned char *buf = (unsigned char *) malloc(6 + 5 + sizeof(fileSize) + strlen(fileName));
-
+	unsigned char *packet, *buf;
+	int packetSize;
+	if(type == CONTROLDATA) {
+		packet = createDataPacket();
+		packetSize = lastDataPacketSize;
+		buf = (unsigned char *) malloc(6 + packetSize);
+	} else {
+		packet = createControlPacket(type);
+		packetSize = 5 + sizeof(fileSize) + strlen(fileName);
+		buf = (unsigned char *) malloc(6 + packetSize);
+	}
   buf[0] = FLAG;
   buf[1] = SEND;
   buf[2] = get_Ns(trama_num) << 6;
   buf[3] = SEND ^ (get_Ns(trama_num) << 6);
-	memmove(buf + 4, packet, 5 + sizeof(fileSize) + strlen(fileName));
-	for(int i = 0; i < 5 + sizeof(fileSize) + strlen(fileName); i++)
-		BCC2 ^= packet[i];
-	buf[4 + 5 + sizeof(fileSize) + strlen(fileName)] = BCC2;
-	buf[4 + 5 + sizeof(fileSize) + strlen(fileName) + 1] = FLAG;
+	memmove(buf + 4, packet, packetSize);
+	if(type == CONTROLDATA) {
+		buf[4 + packetSize] = lastDataPacketBCC2;
+	} else {
+		for(int i = 0; i < packetSize; i++)
+			BCC2 ^= packet[i];
+		buf[4 + packetSize] = BCC2;
+	}
+	buf[4 + packetSize + 1] = FLAG;
 
   return buf;
 }
 
-int send_trama_I(int fd, char *buf, int length) {
+int send_trama_I(int fd, unsigned char *buf, int length) {
+
+	//for(int i = 8; i < length; i++)
+		//printf("OTHER DATA COUNTER: %i %i\n", i-7, buf[i]);
+
   if(write(fd, buf, length) >= 0) return length;
   else return FALSE;
 }
@@ -196,6 +349,49 @@ unsigned char *createControlPacket(unsigned char type) {
 		packet[5 + sizeof(fileSize) + j] = fileName[j];
 
 		return packet;
+}
+
+unsigned char *createDataPacket() {
+  unsigned char *packet, *tmp = malloc(MINK);
+	int actualSize = MINK, j = 0;
+
+	memmove(tmp, fileData + trama_num * MINK, MINK);
+  for(int i = 0; i < MINK; i++)
+		if(tmp[i] == FLAG || tmp[i] == ESCAPE) actualSize++;
+
+	packet = malloc(4 + actualSize);
+
+  packet[0] = CONTROLDATA;
+  packet[1] = trama_num % 255;
+	packet[2] = (int) actualSize / 256;
+	packet[3] = (int) actualSize % 256;
+	lastDataPacketBCC2 = 0x00;
+	lastDataPacketBCC2 ^= packet[0];
+	lastDataPacketBCC2 ^= packet[1];
+	lastDataPacketBCC2 ^= packet[2];
+	lastDataPacketBCC2 ^= packet[3];
+  for(int i = 0; i < MINK; i++) {
+		lastDataPacketBCC2 ^= tmp[i];
+		if(tmp[i] == FLAG) {
+			packet[4 + j] = ESCAPE;
+			j++;
+			packet[4 + j] = ESCAPED_FLAG;
+		} else if(tmp[i] == ESCAPE) {
+			packet[4 + j] = ESCAPE;
+			j++;
+			packet[4 + j] = ESCAPED_ESCAPE;
+		} else {
+			packet[4 + j] = tmp[i];
+		}
+		j++;
+	}
+
+	lastDataPacketSize = 4 + actualSize;
+
+	//for(int i = 4; i < lastDataPacketSize; i++)
+		//printf("DATA COUNTER: %i %i\n", i-3, packet[i]);
+
+	return packet;
 }
 
 void registerFileData(unsigned char *fname) {

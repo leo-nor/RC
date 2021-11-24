@@ -10,27 +10,23 @@
 
 #include "../utils.c"
 
-#define TRANSMITTER 0x01
-
 #define CMD_SEND 0x03
 #define RES_SEND 0x01
 #define CMD_REC 0x01
 #define RES_REC 0x03
 
-#define DATA 0x01
-#define START 0x02
-#define END 0x03
-
 void takeAlarm();
 
 void registerFileData(unsigned char *fname);
 
-unsigned char * create_trama_I(unsigned char type, char SEND);
+unsigned char *create_trama_I(unsigned char type, unsigned char SEND);
 
-int send_trama_I(int fd, char *buf, int length);
+int send_trama_I(int fd, unsigned char *buf, int length);
+
+unsigned char *createDataPacket();
 
 unsigned char *createControlPacket(unsigned char type);
 
 int llopen(int fd, int flag);
 
-int llwrite(int fd, char *buf, int length);
+int llwrite(int fd, unsigned char *buf, int length);

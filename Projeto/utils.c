@@ -4,6 +4,7 @@
 #define TRUE 1
 #define RETRY_ATTEMPTS 3
 #define TIMEOUT_TIME 3
+#define MINK 1024
 
 #define FLAG 0x7E
 #define SET 0x03
@@ -19,6 +20,9 @@
 #define CONTROLSTART 0x02
 #define CONTROLEND 0x03
 
+#define TRANSMITTER 0x01
+#define RECEIVER 0x02
+
 void errorMsg(char* err) {
   printf("O programa falhou: %s\n", err);
 }
@@ -33,20 +37,35 @@ int get_Nr(int t_num) {
   else return 1;
 }
 
-unsigned char * create_trama_S(char C, char SEND, int trama_num) {
+unsigned char * create_trama_S(unsigned char SENDER, unsigned char C, unsigned char SEND, int trama_num) {
   unsigned char *buf = (unsigned char *) malloc(5);
 
   buf[0] = FLAG;
   buf[1] = SEND;
-  if((C == RR || C == REJ) && get_Nr(trama_num) == 1) buf[2] = C ^ 0x80;
-  else buf[2] = C;
-  buf[3] = SEND ^ C;
+  if(SENDER == TRANSMITTER) {
+    if((C == RR || C == REJ) && get_Ns(trama_num) == 1) buf[2] = C ^ 0x80;
+    else buf[2] = C;
+  } else { // RECEIVER
+    if((C == RR || C == REJ) && get_Nr(trama_num) == 1) buf[2] = C ^ 0x80;
+    else buf[2] = C;
+  }
+  if(SENDER == TRANSMITTER) {
+    if((C == RR || C == REJ) && get_Ns(trama_num) == 1) buf[3] = SEND ^ (C ^ 0x80);
+    else buf[3] = SEND ^ C;
+  } else { // RECEIVER
+    if((C == RR || C == REJ) && get_Nr(trama_num) == 1) buf[3] = SEND ^ (C ^ 0x80);
+    else buf[3] = SEND ^ C;
+  }
   buf[4] = FLAG;
 
   return buf;
 }
 
-int send_trama_S(int fd, char C, char SEND, int trama_num) {
-  if(write(fd, create_trama_S(C, SEND, trama_num), 5) >= 0) return TRUE;
+int send_trama_S(int fd, unsigned char SENDER, unsigned char C, unsigned char SEND, int trama_num) {
+  unsigned char *buf = create_trama_S(SENDER, C, SEND, trama_num);
+  //for(int i = 0; i < 5; i++)
+    //printf("wtf %i\n", buf[i]);
+    if(trama_num == 2) if(write(fd, buf, 5) >= 0) exit(0);
+  if(write(fd, buf, 5) >= 0) return TRUE;
   else return FALSE;
 }
