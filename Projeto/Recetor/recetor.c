@@ -22,8 +22,8 @@ int main(int argc, char** argv) {
   int fd;
 
   if ( (argc < 2) ||
-        ((strcmp("/dev/ttyS0", argv[1])!=0) &&
-        (strcmp("/dev/ttyS1", argv[1])!=0) )) {
+        ((strcmp("/dev/ttyS10", argv[1])!=0) &&
+        (strcmp("/dev/ttyS11", argv[1])!=0) )) {
     printf("Usage:\tSerialPort\n\tex: /dev/ttyS1\n");
     exit(1);
   }
@@ -46,16 +46,18 @@ int main(int argc, char** argv) {
 	while(!allFinished) {
 		switch (state) {
 			case CONTROLSTART: {
-				unsigned char *buf = malloc(5);
+			printf("LOOOOOOOK: %i\n\n\n", trama_num);
+				unsigned char *buf = malloc(255);
 				if(llread(fd, buf) == -1) {
 					errorMsg("Failed to receive valid CONTROLSTART!");
 					return -1;
 				} else state = CONTROLDATA;
+				trama_num++;
 				free(buf);
+				break;
 			}
 			case CONTROLDATA: {
-							printf("%s\n", fileName);
-				unsigned char *buf = malloc(5);
+				unsigned char *buf = malloc(255);
 				if(llread(fd, buf) == -1) {
 					errorMsg("Failed to receive valid CONTROLDATA!");
 					return -1;
@@ -65,16 +67,22 @@ int main(int argc, char** argv) {
 					} else {
 						if(trama_num == (fileSize / MINK)) allFinished = TRUE;
 					}
+					/*if(trama_num == 2) {
+						printf("\n\n\n");
+						printf("PACKET DE DADOS: \n");
+						for(int i = 0; i < MINK; i++)
+							printf("%i: %i\n", i, fileData[i]);
+						printf("\n\n\n");
+					}*/
+					printf("LOOK: %i == %li\n", trama_num, (fileSize / MINK) + 1);
+					printf("Finished: %i\n", allFinished);
+					trama_num++;
 				}
-				printf("LOOK: %i == %li\n", trama_num, (fileSize / MINK) + 1);
-				printf("Finished: %i\n", allFinished);
 				free(buf);
+				break;
 			}
 		}
 	}
-							printf("%s\n", fileName);
-
-	printf("GOT HERE\n");
 
 	createFile();
 
@@ -190,13 +198,15 @@ int llread(int fd, unsigned char *buf) {
     }
     if(counter >= 5) {
 			if(packetIsRead) {
-				if(packetIsData)
-					for(int i = 0; i < MINK; i++)
-						BCC2 ^= (fileData + (((trama_num - 1) * MINK)))[i];
-				else
+				if(packetIsData) {
+					for(int i = 0; i < MINK; i++) {
+						BCC2 ^= data[i];
+						//printf("%i: %i\n", i+4, BCC2);
+					}
+				} else
 					for(int i = 4; i < counter; i++)
 						BCC2 ^= buf[i];
-				if(buf[counter] != BCC2) ERROR = TRUE;
+				if(buf[counter] != BCC2) {ERROR = TRUE;printf("BCC2: %i == %i\n", buf[counter], BCC2);}
 				else {
 					counter++;
 			    read(fd, buf + counter, 1);
@@ -207,23 +217,28 @@ int llread(int fd, unsigned char *buf) {
 				if(packetIsData) {
 					switch (parametro) {
 						case 0: //Número da trama
+							//printf("%i: %i\n", -1, BCC2);
 							BCC2 ^= CONTROLDATA;
+							//printf("%i: %i\n", 0, BCC2);
 							if(buf[counter] == trama_num % 255) parametro++;
 							else ERROR = TRUE;
 							break;
 						case 1: // L2
 							BCC2 ^= buf[counter - 1];
+							//printf("%i: %i\n", 1, BCC2);
 							l2 = buf[counter];
 							parametro++;
 							break;
 						case 2: // L1 e cálculo do actualSize
 							BCC2 ^= buf[counter - 1];
+							//printf("%i: %i\n", 2, BCC2);
 							l1 = buf[counter];
 							actualSize = 256 * l2 + l1;
 							parametro++;
 							break;
 						case 3:
 							BCC2 ^= buf[counter - 1];
+							//printf("%i: %i\n", 3, BCC2);
 							data = malloc(MINK);
 							int j = 0;
 							for(int i = 0; i < actualSize; i++) {
@@ -246,8 +261,17 @@ int llread(int fd, unsigned char *buf) {
 								j++;
 							}
 							parametro = 0;
+							printf("TRAMA %i: %i\n", trama_num, ((trama_num - 2) * MINK));
+							memcpy(fileData + ((trama_num - 2) * MINK), data, MINK);
+							if(trama_num == 2) {
+								for(int i = 0; i < MINK; i++)
+									printf("FIRST DATA %i: %i\n", i, fileData[i]);
+							}
+							/*if(trama_num == 9) {
+								for(int i = 0; i < MINK; i++)
+									printf("DATA COUNTER: %i %i\n", i, (fileData + ((trama_num - 2) * MINK))[i]);
+							}*/
 							packetIsRead = TRUE;
-							memmove(fileData + ((trama_num - 1) * MINK), data, MINK);
 							break;
 					}
 				} else {
@@ -289,7 +313,6 @@ int llread(int fd, unsigned char *buf) {
 								}
 							}
 							fileName[fileNameSize] = '\0';
-							printf("%s\n", fileName);
 							parametro = 0;
 							packetIsRead = TRUE;
 							break;
@@ -298,7 +321,7 @@ int llread(int fd, unsigned char *buf) {
 			}
 		}
 	}
-
+// VERIFICAR PORQUE É QUE ESTÁ A REESCREVER O BYTE 0
 	if(ERROR == TRUE) {
 		if(send_trama_S(fd, RECEIVER, REJ, RES_SEND, trama_num))
 			printf("REJ response sent\n");
@@ -309,18 +332,8 @@ int llread(int fd, unsigned char *buf) {
 	  printf("DATA received successfully\n");
 	  if(send_trama_S(fd, RECEIVER, RR, RES_SEND, trama_num)) {
 		printf("Trama: %i\n", trama_num);
-	    printf("RR response sent\n");
-		trama_num++;
-		printf("Last few bytes: \n");
-		printf("%i\n", fileData[10960]);
-		printf("%i\n", fileData[10961]);
-		printf("%i\n", fileData[10962]);
-		printf("%i\n", fileData[10963]);
-		printf("%i\n", fileData[10964]);
-		printf("%i\n", fileData[10965]);
-		printf("%i\n", fileData[10966]);
-		printf("%i\n", fileData[10967]);
-							printf("%s\n", fileName);
+		printf("FIRST DATA %i: %i\n", 0, fileData[0]);
+	  printf("RR response sent\n");
 	  } else
 			errorMsg("Failed to send RR response!");
 		return counter;
@@ -331,8 +344,8 @@ void createFile() {
 	FILE *file;
 	file = fopen(fileName, "w");
 
-	printf("asdasdasd\n");
-	printf("%s\n", fileName);
+	for(int i = 0; i < fileSize - 2000; i++)
+		//printf("FILEDATA %i: %i\n", i, fileData[i]);
 
 	if(file == NULL) {
 		errorMsg("Unable to create file!");

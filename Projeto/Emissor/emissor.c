@@ -28,8 +28,8 @@ int main(int argc, char** argv) {
   int fd;
 
   if ( (argc < 3) ||
-        ((strcmp("/dev/ttyS0", argv[1])!=0) &&
-        (strcmp("/dev/ttyS1", argv[1])!=0) )) {
+        ((strcmp("/dev/ttyS10", argv[1])!=0) &&
+        (strcmp("/dev/ttyS11", argv[1])!=0) )) {
     printf("Usage:\tSerialPort filename\n\tex: /dev/ttyS1 pinguim.gif\n");
     exit(1);
   }
@@ -147,12 +147,13 @@ int main(int argc, char** argv) {
 								if(new_buf[2] != (RR ^ 0x80) && new_buf[2] != (REJ ^ 0x80))
 									ERROR = TRUE;
 							}
+							break;
 		        case 3:
-							printf("\n\n");
+							/*printf("\n\n");
 							printf("Num: %i\n", trama_num);
 							printf("STOP: %i\n", STOP);
 							printf("ERROR: %i\n", ERROR);
-							printf("\n\n");
+							printf("\n\n");*/
 		          if(get_Nr(trama_num) == 0) {
 								if(new_buf[3] != (RES_REC ^ RR) && new_buf[3] != (RES_REC ^ REJ))
 									ERROR = TRUE;
@@ -160,12 +161,12 @@ int main(int argc, char** argv) {
 								if(new_buf[3] != (RES_REC ^ (RR ^ 0x80)) && new_buf[3] != (RES_REC ^ (REJ ^ 0x80)))
 									ERROR = TRUE;
 							}
-								printf("\n\n");
+								/*printf("\n\n");
 								printf("Num: %i\n", trama_num);
 								printf("STOP: %i\n", STOP);
 								printf("ERROR: %i\n", ERROR);
 								printf("%i != %i\n", new_buf[3], (RES_REC ^ RR));
-								printf("\n\n");
+								printf("\n\n");*/
 							break;
 		        case 4:
 		          if(new_buf[4] != FLAG) ERROR = TRUE;
@@ -174,7 +175,7 @@ int main(int argc, char** argv) {
 		      if(counter == 4) STOP = TRUE;
 		      else counter++;
 		    }
-				for(int i = 0; i < 5; i++) printf("wtf %i\n", new_buf[i]);
+				//for(int i = 0; i < 5; i++) printf("wtf %i\n", new_buf[i]);
 				printf("BREAK\n");
 
 				if(STOP == TRUE) {
@@ -366,12 +367,20 @@ unsigned char *createDataPacket() {
 	packet[2] = (int) actualSize / 256;
 	packet[3] = (int) actualSize % 256;
 	lastDataPacketBCC2 = 0x00;
+	//printf("%i: %i\n", -1, lastDataPacketBCC2);
 	lastDataPacketBCC2 ^= packet[0];
+	//printf("%i: %i\n", 0, lastDataPacketBCC2);
 	lastDataPacketBCC2 ^= packet[1];
+	//printf("%i: %i\n", 1, lastDataPacketBCC2);
 	lastDataPacketBCC2 ^= packet[2];
+	//printf("%i: %i\n", 2, lastDataPacketBCC2);
 	lastDataPacketBCC2 ^= packet[3];
+	//printf("%i: %i\n", 3, lastDataPacketBCC2);
   for(int i = 0; i < MINK; i++) {
 		lastDataPacketBCC2 ^= tmp[i];
+		if(trama_num == 9) {
+			printf("DATA COUNTER: %i %i\n", i, tmp[i]);
+		}
 		if(tmp[i] == FLAG) {
 			packet[4 + j] = ESCAPE;
 			j++;
@@ -387,9 +396,6 @@ unsigned char *createDataPacket() {
 	}
 
 	lastDataPacketSize = 4 + actualSize;
-
-	//for(int i = 4; i < lastDataPacketSize; i++)
-		//printf("DATA COUNTER: %i %i\n", i-3, packet[i]);
 
 	return packet;
 }
