@@ -4,7 +4,7 @@ struct termios oldtio, newtio;
 
 volatile int STOP = FALSE, ERROR = FALSE;
 
-int flag=1, timeout=1, trama_num = 1, state = CONTROLSTART;
+int flag=1, timeout=1, trama_num = 1, lastTrama = -1, state = CONTROLSTART;
 
 int allFinished = FALSE;
 
@@ -12,7 +12,7 @@ int lastDataPacketSize = -1;
 unsigned char lastDataPacketBCC2;
 
 unsigned char *fileName, *fileData;
-off_t fileSize;
+off_t fileSize, lastTramaSize;
 
 void takeAlarm() {
 	printf("alarm # %d\n", timeout);
@@ -353,11 +353,20 @@ unsigned char *createControlPacket(unsigned char type) {
 }
 
 unsigned char *createDataPacket() {
-  unsigned char *packet, *tmp = malloc(MINK);
-	int actualSize = MINK, j = 0;
+	unsigned char *packet, *tmp;
+	int toTransferSize, actualSize, j = 0;
+	if(lastTrama == trama_num) {
+		tmp = malloc(lastTramaSize);
+		actualSize = lastTramaSize;
+		toTransferSize = lastTramaSize;
+	} else {
+		tmp = malloc(MINK);
+		actualSize = MINK;
+		toTransferSize = MINK;
+	}
 
-	memmove(tmp, fileData + trama_num * MINK, MINK);
-  for(int i = 0; i < MINK; i++)
+	memmove(tmp, fileData + ((trama_num - 2) * MINK), toTransferSize);
+  for(int i = 0; i < toTransferSize; i++)
 		if(tmp[i] == FLAG || tmp[i] == ESCAPE) actualSize++;
 
 	packet = malloc(4 + actualSize);
@@ -376,9 +385,9 @@ unsigned char *createDataPacket() {
 	//printf("%i: %i\n", 2, lastDataPacketBCC2);
 	lastDataPacketBCC2 ^= packet[3];
 	//printf("%i: %i\n", 3, lastDataPacketBCC2);
-  for(int i = 0; i < MINK; i++) {
+  for(int i = 0; i < toTransferSize; i++) {
 		lastDataPacketBCC2 ^= tmp[i];
-		if(trama_num == 9) {
+		if(trama_num == lastTrama) {
 			printf("DATA COUNTER: %i %i\n", i, tmp[i]);
 		}
 		if(tmp[i] == FLAG) {
@@ -415,7 +424,11 @@ void registerFileData(unsigned char *fname) {
     exit(-1);
   }
   fileSize = st.st_size;
-  fileData = (unsigned char *) malloc(fileSize);
+	lastTramaSize = fileSize % MINK;
+	lastTrama = fileSize / MINK;
+	if(lastTramaSize > 0) lastTrama++;
+	lastTrama += 1; // WILL BE 2
+  fileData = malloc(fileSize);
   if(fread(fileData, sizeof(unsigned char), fileSize, file) < fileSize) {
     errorMsg("Failed to read file's data!");
     exit(-1);

@@ -4,12 +4,12 @@ struct termios oldtio,newtio;
 
 volatile int STOP = FALSE, ERROR = FALSE;
 
-int flag = 1, timeout = 1, trama_num = 1, state = CONTROLSTART;
+int flag = 1, timeout = 1, trama_num = 1, lastTrama, state = CONTROLSTART;
 
 int allFinished = FALSE;
 
 unsigned char *fileName, *fileData;
-off_t fileSize;
+off_t fileSize, lastTramaSize;
 
 void takeAlarm() {
 	printf("alarm # %d\n", timeout);
@@ -57,16 +57,12 @@ int main(int argc, char** argv) {
 				break;
 			}
 			case CONTROLDATA: {
-				unsigned char *buf = malloc(255);
+				unsigned char *buf = malloc(2 * MINK + 6);
 				if(llread(fd, buf) == -1) {
 					errorMsg("Failed to receive valid CONTROLDATA!");
 					return -1;
 				} else {
-					if(fileSize % MINK > 0) {
-						if(trama_num == ((fileSize / MINK) + 1)) allFinished = TRUE;
-					} else {
-						if(trama_num == (fileSize / MINK)) allFinished = TRUE;
-					}
+					if(trama_num == lastTrama) allFinished = TRUE;
 					/*if(trama_num == 2) {
 						printf("\n\n\n");
 						printf("PACKET DE DADOS: \n");
@@ -74,7 +70,7 @@ int main(int argc, char** argv) {
 							printf("%i: %i\n", i, fileData[i]);
 						printf("\n\n\n");
 					}*/
-					printf("LOOK: %i == %li\n", trama_num, (fileSize / MINK) + 1);
+					printf("LOOK: %i == %i\n", trama_num, lastTrama);
 					printf("Finished: %i\n", allFinished);
 					trama_num++;
 				}
@@ -84,6 +80,8 @@ int main(int argc, char** argv) {
 		}
 	}
 
+
+	printf("Let's create a file!!\n");
 	createFile();
 
   if ( tcsetattr(fd,TCSANOW,&oldtio) == -1) {
@@ -199,10 +197,16 @@ int llread(int fd, unsigned char *buf) {
     if(counter >= 5) {
 			if(packetIsRead) {
 				if(packetIsData) {
-					for(int i = 0; i < MINK; i++) {
-						BCC2 ^= data[i];
-						//printf("%i: %i\n", i+4, BCC2);
-					}
+					if(trama_num < lastTrama)
+						for(int i = 0; i < MINK; i++) {
+							BCC2 ^= data[i];
+							//printf("%i: %i\n", i+4, BCC2);
+						}
+					else
+						for(int i = 0; i < lastTramaSize; i++) {
+							BCC2 ^= data[i];
+							//printf("%i: %i\n", i+4, BCC2);
+						}
 				} else
 					for(int i = 4; i < counter; i++)
 						BCC2 ^= buf[i];
@@ -239,7 +243,8 @@ int llread(int fd, unsigned char *buf) {
 						case 3:
 							BCC2 ^= buf[counter - 1];
 							//printf("%i: %i\n", 3, BCC2);
-							data = malloc(MINK);
+							if(trama_num < lastTrama) data = malloc(MINK);
+							else data = malloc(lastTramaSize);
 							int j = 0;
 							for(int i = 0; i < actualSize; i++) {
 								//printf("DATA COUNTER: %i ", j + 1);
@@ -261,16 +266,18 @@ int llread(int fd, unsigned char *buf) {
 								j++;
 							}
 							parametro = 0;
-							printf("TRAMA %i: %i\n", trama_num, ((trama_num - 2) * MINK));
-							memcpy(fileData + ((trama_num - 2) * MINK), data, MINK);
-							if(trama_num == 2) {
-								for(int i = 0; i < MINK; i++)
-									printf("FIRST DATA %i: %i\n", i, fileData[i]);
+							if(trama_num < lastTrama) memmove(fileData + ((trama_num - 2) * MINK), data, MINK);
+							else memmove(fileData + ((trama_num - 2) * MINK), data, lastTramaSize);
+							if(trama_num == 12) {
+								for(int i = 0; i < lastTramaSize; i++)
+									printf("LAST DATA %i: %i\n", i, data[i]);
+								printf("LAST BYTE: %i\n", fileData[9944]);
+							} else if(trama_num == 11){
+								printf("LAST BYTE: %i\n", fileData[9215]);
+								printf("LAST BYTE: %i\n", fileData[9216]);
 							}
-							/*if(trama_num == 9) {
-								for(int i = 0; i < MINK; i++)
-									printf("DATA COUNTER: %i %i\n", i, (fileData + ((trama_num - 2) * MINK))[i]);
-							}*/
+							// UMA DAS TRAMAS ESTÁ A SER PERDIDA,
+							// SÓ ESTÁ A ESCREVEL 1024*9 + 728 EM VEZ DE 1024*10 + 728
 							packetIsRead = TRUE;
 							break;
 					}
@@ -293,6 +300,10 @@ int llread(int fd, unsigned char *buf) {
 								}
 							}
 							fileData = malloc(fileSize);
+							lastTramaSize = fileSize % MINK;
+							lastTrama = fileSize / MINK;
+							if(lastTramaSize > 0) lastTrama++;
+							lastTrama += 1; // WILL BE 2
 							parametro++;
 							break;
 						case 3:
@@ -321,7 +332,11 @@ int llread(int fd, unsigned char *buf) {
 			}
 		}
 	}
-// VERIFICAR PORQUE É QUE ESTÁ A REESCREVER O BYTE 0
+
+	if(packetIsData) free(data);
+
+	// VERIFICAR PORQUE É QUE ESTÁ A REESCREVER O BYTE 0
+
 	if(ERROR == TRUE) {
 		if(send_trama_S(fd, RECEIVER, REJ, RES_SEND, trama_num))
 			printf("REJ response sent\n");
