@@ -30,3 +30,5 @@ unsigned char *createControlPacket(unsigned char type);
 int llopen(int fd, int flag);
 
 int llwrite(int fd, unsigned char *buf, int length);
+
+int llclose(int fd);

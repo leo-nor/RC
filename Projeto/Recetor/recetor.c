@@ -9,7 +9,7 @@ int flag = 1, timeout = 1, trama_num = 1, lastTrama, state = CONTROLSTART;
 int allFinished = FALSE;
 
 unsigned char *fileName, *fileData;
-off_t fileSize, lastTramaSize;
+off_t fileSize, lastTramaSize, tmpSize;
 
 void takeAlarm() {
 	printf("alarm # %d\n", timeout);
@@ -46,7 +46,7 @@ int main(int argc, char** argv) {
 	while(!allFinished) {
 		switch (state) {
 			case CONTROLSTART: {
-			printf("LOOOOOOOK: %i\n\n\n", trama_num);
+			//printf("LOOOOOOOK: %i\n\n\n", trama_num);
 				unsigned char *buf = malloc(255);
 				if(llread(fd, buf) == -1) {
 					errorMsg("Failed to receive valid CONTROLSTART!");
@@ -62,7 +62,10 @@ int main(int argc, char** argv) {
 					errorMsg("Failed to receive valid CONTROLDATA!");
 					return -1;
 				} else {
-					if(trama_num == lastTrama) allFinished = TRUE;
+					if(trama_num == lastTrama) {
+						state = CONTROLEND;
+						createFile();
+					}
 					/*if(trama_num == 2) {
 						printf("\n\n\n");
 						printf("PACKET DE DADOS: \n");
@@ -70,23 +73,33 @@ int main(int argc, char** argv) {
 							printf("%i: %i\n", i, fileData[i]);
 						printf("\n\n\n");
 					}*/
-					printf("LOOK: %i == %i\n", trama_num, lastTrama);
-					printf("Finished: %i\n", allFinished);
+					//printf("LOOK: %i == %i\n", trama_num, lastTrama);
+					//printf("Finished: %i\n", allFinished);
 					trama_num++;
 				}
+				free(buf);
+				break;
+			}
+			case CONTROLEND: {
+			//printf("LOOOOOOOK: %i\n\n\n", trama_num);
+				unsigned char *buf = malloc(255);
+				if(llread(fd, buf) == -1) {
+					errorMsg("Failed to receive valid CONTROLEND!");
+					return -1;
+				} else allFinished = TRUE;
+				//trama_num++;
 				free(buf);
 				break;
 			}
 		}
 	}
 
+	//printf("Let's create a file!!\n");
 
-	printf("Let's create a file!!\n");
-	createFile();
 
-  if ( tcsetattr(fd,TCSANOW,&oldtio) == -1) {
-		perror("tcsetattr");
-		exit(-1);
+	if(llclose(fd) == -1) {
+		errorMsg("llclose() falhou!");
+		return -1;
 	}
 
 	close(fd);
@@ -168,7 +181,7 @@ int llread(int fd, unsigned char *buf) {
   int counter = -1, parametro = 0, packetIsData = FALSE, packetIsRead = FALSE;
 	int fileNameSize = 0, fileSizeSize = 0, actualSize, l1, l2;
 	unsigned char BCC2 = 0x00;
-	unsigned char *data;
+	unsigned char *data, *tmpName;
 
   while (STOP==FALSE && ERROR==FALSE) {
 		counter++;
@@ -192,6 +205,8 @@ int llread(int fd, unsigned char *buf) {
         break;
 			case 4:
 				if(buf[4] == CONTROLDATA) packetIsData = TRUE;
+				else
+					if(!((trama_num == 1 && buf[4] == CONTROLSTART) || (trama_num >= lastTrama && buf[4] == CONTROLEND))) ERROR = TRUE;
 				break;
     }
     if(counter >= 5) {
@@ -210,7 +225,10 @@ int llread(int fd, unsigned char *buf) {
 				} else
 					for(int i = 4; i < counter; i++)
 						BCC2 ^= buf[i];
-				if(buf[counter] != BCC2) {ERROR = TRUE;printf("BCC2: %i == %i\n", buf[counter], BCC2);}
+				if(buf[counter] != BCC2) {
+					ERROR = TRUE;
+					//printf("BCC2: %i == %i\n", buf[counter], BCC2);
+				}
 				else {
 					counter++;
 			    read(fd, buf + counter, 1);
@@ -268,65 +286,112 @@ int llread(int fd, unsigned char *buf) {
 							parametro = 0;
 							if(trama_num < lastTrama) memmove(fileData + ((trama_num - 2) * MINK), data, MINK);
 							else memmove(fileData + ((trama_num - 2) * MINK), data, lastTramaSize);
-							if(trama_num == 12) {
+							/*if(trama_num == 12) {
 								for(int i = 0; i < lastTramaSize; i++)
 									printf("LAST DATA %i: %i\n", i, data[i]);
 								printf("LAST BYTE: %i\n", fileData[9944]);
 							} else if(trama_num == 11){
 								printf("LAST BYTE: %i\n", fileData[9215]);
 								printf("LAST BYTE: %i\n", fileData[9216]);
-							}
+							}*/
 							// UMA DAS TRAMAS ESTÁ A SER PERDIDA,
 							// SÓ ESTÁ A ESCREVEL 1024*9 + 728 EM VEZ DE 1024*10 + 728
 							packetIsRead = TRUE;
 							break;
 					}
 				} else {
-					switch (parametro) {
-						case 0:
-							if(buf[counter] == 0x00) parametro++;
-							else ERROR = TRUE;
-							break;
-						case 1:
-							fileSizeSize = buf[counter];
-							parametro++;
-							break;
-						case 2:
-							for(int i = 0; i < fileSizeSize; i++) {
-								fileSize = fileSize | (buf[counter] << (8*((fileSizeSize-i)-1)));
-								if(!(i == fileSizeSize-1)) {
-									counter++;
-									read(fd, buf + counter, 1);
+					if(buf[4] == CONTROLSTART) {
+						switch (parametro) {
+							case 0:
+								if(buf[counter] == 0x00) parametro++;
+								else ERROR = TRUE;
+								break;
+							case 1:
+								fileSizeSize = buf[counter];
+								parametro++;
+								break;
+							case 2:
+								for(int i = 0; i < fileSizeSize; i++) {
+									fileSize = fileSize | (buf[counter] << (8*((fileSizeSize-i)-1)));
+									if(!(i == fileSizeSize-1)) {
+										counter++;
+										read(fd, buf + counter, 1);
+									}
 								}
-							}
-							fileData = malloc(fileSize);
-							lastTramaSize = fileSize % MINK;
-							lastTrama = fileSize / MINK;
-							if(lastTramaSize > 0) lastTrama++;
-							lastTrama += 1; // WILL BE 2
-							parametro++;
-							break;
-						case 3:
-							if(buf[counter] == 0x01) parametro++;
-							else ERROR = TRUE;
-							break;
-						case 4:
-							fileName = (unsigned char *) malloc(buf[counter] + 1);
-							fileNameSize = buf[counter];
-							parametro++;
-							break;
-						case 5:
-							for(int i = 0; i < fileNameSize; i++) {
-								fileName[i] = buf[counter];
-								if(!(i == fileNameSize-1)) {
-									counter++;
-									read(fd, buf + counter, 1);
+								fileData = malloc(fileSize);
+								lastTramaSize = fileSize % MINK;
+								lastTrama = fileSize / MINK;
+								if(lastTramaSize > 0) lastTrama++;
+								else lastTramaSize = MINK;
+								lastTrama += 1;
+								parametro++;
+								break;
+							case 3:
+								if(buf[counter] == 0x01) parametro++;
+								else ERROR = TRUE;
+								break;
+							case 4:
+								fileName = (unsigned char *) malloc(buf[counter] + 1);
+								fileNameSize = buf[counter];
+								parametro++;
+								break;
+							case 5:
+								for(int i = 0; i < fileNameSize; i++) {
+									fileName[i] = buf[counter];
+									if(!(i == fileNameSize-1)) {
+										counter++;
+										read(fd, buf + counter, 1);
+									}
 								}
-							}
-							fileName[fileNameSize] = '\0';
-							parametro = 0;
-							packetIsRead = TRUE;
-							break;
+								fileName[fileNameSize] = '\0';
+								parametro = 0;
+								packetIsRead = TRUE;
+								break;
+						}
+					} else if(buf[4] == CONTROLEND) {
+						switch (parametro) {
+							case 0:
+								if(buf[counter] == 0x00) parametro++;
+								else ERROR = TRUE;
+								break;
+							case 1:
+								fileSizeSize = buf[counter];
+								parametro++;
+								break;
+							case 2:
+								for(int i = 0; i < fileSizeSize; i++) {
+									tmpSize = tmpSize | (buf[counter] << (8*((fileSizeSize-i)-1)));
+									if(!(i == fileSizeSize-1)) {
+										counter++;
+										read(fd, buf + counter, 1);
+									}
+								}
+								if(tmpSize == fileSize) parametro++;
+								else ERROR = TRUE;
+								break;
+							case 3:
+								if(buf[counter] == 0x01) parametro++;
+								else ERROR = TRUE;
+								break;
+							case 4:
+								tmpName = (unsigned char *) malloc(buf[counter] + 1);
+								fileNameSize = buf[counter];
+								parametro++;
+								break;
+							case 5:
+								for(int i = 0; i < fileNameSize; i++) {
+									tmpName[i] = buf[counter];
+									if(!(i == fileNameSize-1)) {
+										counter++;
+										read(fd, buf + counter, 1);
+									}
+								}
+								tmpName[fileNameSize] = '\0';
+								parametro = 0;
+								if(!strcmp(tmpName, fileName)) packetIsRead = TRUE;
+								else ERROR = TRUE;
+								break;
+						}
 					}
 				}
 			}
@@ -334,8 +399,6 @@ int llread(int fd, unsigned char *buf) {
 	}
 
 	if(packetIsData) free(data);
-
-	// VERIFICAR PORQUE É QUE ESTÁ A REESCREVER O BYTE 0
 
 	if(ERROR == TRUE) {
 		if(send_trama_S(fd, RECEIVER, REJ, RES_SEND, trama_num))
@@ -346,12 +409,93 @@ int llread(int fd, unsigned char *buf) {
 	} else {
 	  printf("DATA received successfully\n");
 	  if(send_trama_S(fd, RECEIVER, RR, RES_SEND, trama_num)) {
-		printf("Trama: %i\n", trama_num);
-		printf("FIRST DATA %i: %i\n", 0, fileData[0]);
+		//printf("Trama: %i\n", trama_num);
+		//printf("FIRST DATA %i: %i\n", 0, fileData[0]);
 	  printf("RR response sent\n");
 	  } else
 			errorMsg("Failed to send RR response!");
 		return counter;
+	}
+}
+
+int llclose(int fd) {
+  unsigned char *buf = malloc(5);
+  int counter = 0;
+	STOP = FALSE;
+
+  while (STOP==FALSE && ERROR==FALSE) {
+    read(fd, buf + counter, 1);
+    switch (counter) {
+      case 0:
+        if(buf[0] != FLAG) ERROR = TRUE;
+        break;
+      case 1:
+        if(buf[1] != CMD_REC) ERROR = TRUE;
+        break;
+      case 2:
+        if(buf[2] != DISC) ERROR = TRUE;
+        break;
+      case 3:
+        if(buf[3] != (CMD_REC^DISC)) ERROR = TRUE;
+        break;
+      case 4:
+        if(buf[4] != FLAG) ERROR = TRUE;
+        break;
+    }
+    if(counter == 4) STOP = TRUE;
+    else counter++;
+  }
+
+	if(ERROR == TRUE) {
+		errorMsg("Failed to receive DISC command!");
+		return -1;
+  } else {
+    printf("DISC received successfully\n");
+    if(send_trama_S(fd, RECEIVER, DISC, RES_SEND, trama_num))
+      printf("DISC response sent\n");
+    else
+      errorMsg("Failed to send DISC response!");
+  }
+
+	STOP = FALSE;
+	free(buf);
+  buf = malloc(5);
+  counter = 0;
+
+	while (STOP==FALSE && ERROR==FALSE) {
+    read(fd, buf + counter, 1);
+    switch (counter) {
+      case 0:
+        if(buf[0] != FLAG) ERROR = TRUE;
+        break;
+      case 1:
+        if(buf[1] != CMD_REC) ERROR = TRUE;
+        break;
+      case 2:
+        if(buf[2] != UA) ERROR = TRUE;
+        break;
+      case 3:
+        if(buf[3] != (CMD_REC^UA)) ERROR = TRUE;
+        break;
+      case 4:
+        if(buf[4] != FLAG) ERROR = TRUE;
+        break;
+    }
+    if(counter == 4) STOP = TRUE;
+    else counter++;
+  }
+
+	if(ERROR == TRUE) {
+		errorMsg("Failed to receive UA command!");
+		return -1;
+	} else {
+		printf("UA received successfully\n");
+		return fd;
+	}
+
+  if ( tcsetattr(fd,TCSANOW,&oldtio) == -1) {
+		perror("tcsetattr");
+		exit(-1);
 	}
 }
 

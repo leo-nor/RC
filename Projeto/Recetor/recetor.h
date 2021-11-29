@@ -20,4 +20,6 @@ int llopen(int fd, int flag);
 
 int llread(int fd, unsigned char *buf);
 
+int llclose(int fd);
+
 void createFile();

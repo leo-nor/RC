@@ -1,6 +1,7 @@
 #include "emissor.h"
 
 struct termios oldtio, newtio;
+struct timespec start, finish;
 
 volatile int STOP = FALSE, ERROR = FALSE;
 
@@ -22,7 +23,6 @@ void takeAlarm() {
 }
 
 int main(int argc, char** argv) {
-	struct timespec start, finish;
 	clock_gettime(CLOCK_REALTIME, &start);
 
   int fd;
@@ -53,13 +53,13 @@ int main(int argc, char** argv) {
 
 	while(!allFinished) {
 		switch (state) {
-			case CONTROLSTART:
+			case CONTROLSTART: {
 				if(llwrite(fd, create_trama_I(CONTROLSTART, CMD_SEND), 6 + 5 + sizeof(fileSize) + strlen(fileName)) == -1) {
 					errorMsg("llwrite() falhou!");
 					return -1;
-				}
+				} else printf("CONTROLSTART command sent\n");
 
-				unsigned char new_buf[255];
+				unsigned char *new_buf = malloc(5);
 		    int counter = 0;
 				STOP = FALSE, ERROR = FALSE;
 
@@ -115,6 +115,9 @@ int main(int argc, char** argv) {
 						return -1;
 					}
 		    }
+				free(new_buf);
+				break;
+			}
 			case CONTROLDATA: {
 				unsigned char *tmp = malloc(lastDataPacketSize + 6);
 				tmp = create_trama_I(CONTROLDATA, CMD_SEND);
@@ -122,7 +125,7 @@ int main(int argc, char** argv) {
 				if(llwrite(fd, tmp, lastDataPacketSize + 6) == -1) {
 					errorMsg("llwrite() falhou!");
 					return -1;
-				}
+				} else printf("CONTROLDATA command sent\n");
 
 				unsigned char *new_buf = malloc(5);
 		    int counter = 0;
@@ -176,14 +179,14 @@ int main(int argc, char** argv) {
 		      else counter++;
 		    }
 				//for(int i = 0; i < 5; i++) printf("wtf %i\n", new_buf[i]);
-				printf("BREAK\n");
+				//printf("BREAK\n");
 
 				if(STOP == TRUE) {
 					if(new_buf[2] == REJ || new_buf[2] == (REJ ^ 0x80)) {
 						printf("REJ received, repeating CONTROLDATA\n");
 					} else {
 						printf("RR received successfully\n");
-						state = CONTROLDATA;
+						if(trama_num == lastTrama) state = CONTROLEND;
 						trama_num++;
 					}
 					timeout = 1;
@@ -193,18 +196,79 @@ int main(int argc, char** argv) {
 						return -1;
 					}
 		    }
+				break;
+			}
+			case CONTROLEND: {
+				if(llwrite(fd, create_trama_I(CONTROLEND, CMD_SEND), 6 + 5 + sizeof(fileSize) + strlen(fileName)) == -1) {
+					errorMsg("llwrite() falhou!");
+					return -1;
+				} else printf("CONTROLEND command sent\n");
+
+				unsigned char *new_buf = malloc(5);
+		    int counter = 0;
+				STOP = FALSE, ERROR = FALSE;
+
+		    alarm(TIMEOUT_TIME);
+
+		    while (STOP==FALSE && ERROR==FALSE) {
+		      read(fd, new_buf + counter, 1);
+		      switch (counter) {
+		        case 0:
+		          if(new_buf[0] != FLAG) ERROR = TRUE;
+		          break;
+		        case 1:
+		          if(new_buf[1] != RES_REC) ERROR = TRUE;
+		          break;
+		        case 2:
+		          if(get_Nr(trama_num) == 0) {
+								if(new_buf[2] != RR && new_buf[2] != REJ)
+									ERROR = TRUE;
+							} else {
+								if(new_buf[2] != (RR ^ 0x80) && new_buf[2] != (REJ ^ 0x80))
+									ERROR = TRUE;
+							}
+		          break;
+		        case 3:
+		          if(get_Nr(trama_num) == 0) {
+								if(new_buf[3] != (RES_REC ^ RR) && new_buf[3] != (RES_REC ^ REJ))
+									ERROR = TRUE;
+							} else {
+								if(new_buf[3] != (RES_REC ^ (RR ^ 0x80)) && new_buf[3] != (RES_REC ^ (REJ ^ 0x80)))
+									ERROR = TRUE;
+							}
+							break;
+		        case 4:
+		          if(new_buf[4] != FLAG) ERROR = TRUE;
+		          break;
+		      }
+		      if(counter == 4) STOP = TRUE;
+		      else counter++;
+		    }
+
+		    if(STOP == TRUE) {
+					if(new_buf[2] == REJ || new_buf[2] == (REJ ^ 0x80)) {
+						printf("REJ received, repeating CONTROLEND\n");
+					} else {
+						printf("RR received successfully\n");
+						allFinished = TRUE;
+						//trama_num++;
+					}
+					timeout = 1;
+				} else {
+					if(timeout > RETRY_ATTEMPTS) {
+			      errorMsg("Failed to receive valid response to CONTROLEND!");
+						return -1;
+					}
+		    }
+				free(new_buf);
+				break;
 			}
 		}
 	}
 
-	clock_gettime(CLOCK_REALTIME, &finish);
-	double time_taken = (finish.tv_sec - start.tv_sec) + (finish.tv_nsec - start.tv_nsec) / 1E9;
-
-	printf("Tempo utilizado pelo programa: %f segundos\n", time_taken);
-
-	if ( tcsetattr(fd,TCSANOW,&oldtio) == -1) {
-		perror("tcsetattr");
-		exit(-1);
+	if(llclose(fd) == -1) {
+		errorMsg("llclose() falhou!");
+		return -1;
 	}
 
 	close(fd);
@@ -297,6 +361,73 @@ int llwrite(int fd, unsigned char *buf, int length) {
 	return send_trama_I(fd, buf, length);
 }
 
+int llclose(int fd) {
+  while(timeout <= RETRY_ATTEMPTS) {
+    if(send_trama_S(fd, TRANSMITTER, DISC, CMD_SEND, trama_num))
+			printf("DISC command sent\n");
+		else
+			errorMsg("Failed to send DISC command!");
+
+    alarm(TIMEOUT_TIME);
+
+    unsigned char new_buf[5];
+    int counter = 0;
+
+    while (STOP==FALSE && ERROR==FALSE) {
+      read(fd, new_buf + counter, 1);
+      switch (counter) {
+        case 0:
+          if(new_buf[0] != FLAG) ERROR = TRUE;
+          break;
+        case 1:
+          if(new_buf[1] != RES_REC) ERROR = TRUE;
+          break;
+        case 2:
+          if(new_buf[2] != DISC) ERROR = TRUE;
+          break;
+        case 3:
+          if(new_buf[3] != (RES_REC^DISC)) ERROR = TRUE;
+          break;
+        case 4:
+          if(new_buf[4] != FLAG) ERROR = TRUE;
+          break;
+      }
+      if(counter == 4) STOP = TRUE;
+      else counter++;
+    }
+
+    if(STOP == TRUE) break;
+    else {
+      ERROR = FALSE;
+      counter = 0;
+    }
+  }
+
+  if(timeout > RETRY_ATTEMPTS) {
+		errorMsg("Failed to receive DISC response!");
+		return -1;
+	} else {
+		printf("DISC received successfully\n");
+		timeout = 1;
+		if(send_trama_S(fd, TRANSMITTER, UA, CMD_SEND, trama_num))
+			printf("UA command sent\n");
+		else
+			errorMsg("Failed to send UA command!");
+
+		clock_gettime(CLOCK_REALTIME, &finish);
+		double time_taken = (finish.tv_sec - start.tv_sec) + (finish.tv_nsec - start.tv_nsec) / 1E9;
+
+		printf("Tempo utilizado pelo programa: %f segundos\n", time_taken);
+
+		if ( tcsetattr(fd,TCSANOW,&oldtio) == -1) {
+			perror("tcsetattr");
+			exit(-1);
+		}
+
+		return fd;
+	}
+}
+
 unsigned char * create_trama_I(unsigned char type, unsigned char SEND) {
 	unsigned char BCC2 = 0x00;
 	unsigned char *packet, *buf;
@@ -387,9 +518,9 @@ unsigned char *createDataPacket() {
 	//printf("%i: %i\n", 3, lastDataPacketBCC2);
   for(int i = 0; i < toTransferSize; i++) {
 		lastDataPacketBCC2 ^= tmp[i];
-		if(trama_num == lastTrama) {
+		/*if(trama_num == lastTrama) {
 			printf("DATA COUNTER: %i %i\n", i, tmp[i]);
-		}
+		}*/
 		if(tmp[i] == FLAG) {
 			packet[4 + j] = ESCAPE;
 			j++;
@@ -427,7 +558,8 @@ void registerFileData(unsigned char *fname) {
 	lastTramaSize = fileSize % MINK;
 	lastTrama = fileSize / MINK;
 	if(lastTramaSize > 0) lastTrama++;
-	lastTrama += 1; // WILL BE 2
+	else lastTramaSize = MINK;
+	lastTrama += 1;
   fileData = malloc(fileSize);
   if(fread(fileData, sizeof(unsigned char), fileSize, file) < fileSize) {
     errorMsg("Failed to read file's data!");

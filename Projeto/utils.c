@@ -1,4 +1,4 @@
-#define BAUDRATE B38400
+#define BAUDRATE B9600
 #define _POSIX_SOURCE 1 /* POSIX compliant source */
 #define FALSE 0
 #define TRUE 1
@@ -63,8 +63,6 @@ unsigned char * create_trama_S(unsigned char SENDER, unsigned char C, unsigned c
 
 int send_trama_S(int fd, unsigned char SENDER, unsigned char C, unsigned char SEND, int trama_num) {
   unsigned char *buf = create_trama_S(SENDER, C, SEND, trama_num);
-  //for(int i = 0; i < 5; i++)
-    //printf("wtf %i\n", buf[i]);
   if(write(fd, buf, 5) >= 0) return TRUE;
   else return FALSE;
 }
