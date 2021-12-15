@@ -28,8 +28,8 @@ int main(int argc, char** argv) {
   int fd;
 
   if ( (argc < 3) ||
-        ((strcmp("/dev/ttyS10", argv[1])!=0) &&
-        (strcmp("/dev/ttyS11", argv[1])!=0) )) {
+        ((strcmp("/dev/ttyS0", argv[1])!=0) &&
+        (strcmp("/dev/ttyS1", argv[1])!=0) )) {
     printf("Usage:\tSerialPort filename\n\tex: /dev/ttyS1 pinguim.gif\n");
     exit(1);
   }
