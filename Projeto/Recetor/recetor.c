@@ -22,8 +22,8 @@ int main(int argc, char** argv) {
   int fd;
 
   if ( (argc < 2) ||
-        ((strcmp("/dev/ttyS10", argv[1])!=0) &&
-        (strcmp("/dev/ttyS11", argv[1])!=0) )) {
+        ((strcmp("/dev/ttyS0", argv[1])!=0) &&
+        (strcmp("/dev/ttyS1", argv[1])!=0) )) {
     printf("Usage:\tSerialPort\n\tex: /dev/ttyS1\n");
     exit(1);
   }
@@ -59,8 +59,12 @@ int main(int argc, char** argv) {
 			case CONTROLDATA: {
 				unsigned char *buf = malloc(2 * MINK + 6);
 				if(llread(fd, buf) == -1) {
-					errorMsg("Failed to receive valid CONTROLDATA!");
-					return -1;
+                    if(timeout > TIMEOUT_TIME) {
+					    errorMsg("Failed to receive valid CONTROLDATA!");
+					    return -1;
+                    } else {                       
+                        continue;
+                    }
 				} else {
 					if(trama_num == lastTrama) {
 						state = CONTROLEND;
@@ -183,6 +187,8 @@ int llread(int fd, unsigned char *buf) {
 	unsigned char BCC2 = 0x00;
 	unsigned char *data, *tmpName;
 
+    alarm(TIMEOUT_TIME);
+
   while (STOP==FALSE && ERROR==FALSE) {
 		counter++;
     read(fd, buf + counter, 1);
@@ -265,6 +271,7 @@ int llread(int fd, unsigned char *buf) {
 							else data = malloc(lastTramaSize);
 							int j = 0;
 							for(int i = 0; i < actualSize; i++) {
+                                if(ERROR == TRUE) break;
 								//printf("DATA COUNTER: %i ", j + 1);
 								//printf("%i\n", buf[counter]);
 								if(buf[counter] == ESCAPE) {
@@ -419,27 +426,27 @@ int llread(int fd, unsigned char *buf) {
 }
 
 int llclose(int fd) {
-  unsigned char *buf = malloc(5);
+  unsigned char new_buf1[5];
   int counter = 0;
-	STOP = FALSE;
+	STOP = FALSE; ERROR = FALSE;
 
   while (STOP==FALSE && ERROR==FALSE) {
-    read(fd, buf + counter, 1);
+    read(fd, new_buf1 + counter, 1);
     switch (counter) {
       case 0:
-        if(buf[0] != FLAG) ERROR = TRUE;
+        if(new_buf1[0] != FLAG) ERROR = TRUE;
         break;
       case 1:
-        if(buf[1] != CMD_REC) ERROR = TRUE;
+        if(new_buf1[1] != CMD_REC) ERROR = TRUE;
         break;
       case 2:
-        if(buf[2] != DISC) ERROR = TRUE;
+        if(new_buf1[2] != DISC) ERROR = TRUE;
         break;
       case 3:
-        if(buf[3] != (CMD_REC^DISC)) ERROR = TRUE;
+        if(new_buf1[3] != (CMD_REC^DISC)) ERROR = TRUE;
         break;
       case 4:
-        if(buf[4] != FLAG) ERROR = TRUE;
+        if(new_buf1[4] != FLAG) ERROR = TRUE;
         break;
     }
     if(counter == 4) STOP = TRUE;
@@ -458,8 +465,7 @@ int llclose(int fd) {
   }
 
 	STOP = FALSE;
-	free(buf);
-  buf = malloc(5);
+  unsigned char buf[5];
   counter = 0;
 
 	while (STOP==FALSE && ERROR==FALSE) {
