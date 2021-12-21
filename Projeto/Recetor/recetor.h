@@ -23,3 +23,5 @@ int llread(int fd, unsigned char *buf);
 int llclose(int fd);
 
 void createFile();
+
+void closeFile();

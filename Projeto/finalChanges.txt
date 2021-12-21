@@ -1,0 +1,24 @@
+Both Files:
+
+- Removed all test printfs
+
+recetor.c:
+
+- Removed all mentions and uses of the alarm function which shouldn't be there in the first place, and changed the VTIME to 0 and the VMIN to 1
+
+- Added line of code that simulates a connection drop:
+    Line 224: 
+        //if(test == 8) ERROR = TRUE;
+		//test++;
+
+- Made it so that when the llread function fails due to timeout, it cleans the fd of all its contents before sending the REJ, throwing them away, 
+so it can start reading correctly the resending of the trama that just failed:
+    Line 393:
+		char trash[MINK + 255];
+		read(fd, trash, MINK + 255);
+
+- Changed the program so that it doesn't create a variable with fileSize size to hold the data, but instead, as the professor recommended, writes to the file
+    as it receives the data, trama by trama:
+    Line 262:
+        if(trama_num < lastTrama) fwrite(data, sizeof(unsigned char), MINK, file);
+		else fwrite(data, sizeof(unsigned char), lastTramaSize, file);
