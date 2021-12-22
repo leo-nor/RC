@@ -2,6 +2,13 @@ Both Files:
 
 - Removed all test printfs
 
+emissor.c:
+
+- Changed the program so that it doesn't create a variable with fileSize size to hold the data, but instead, as the professor recommended, reads from the file
+    as it gets the data to transfer, trama by trama:
+    Line 484:
+        fread(tmp, sizeof(unsigned char), toTransferSize, file);
+
 recetor.c:
 
 - Removed all mentions and uses of the alarm function which shouldn't be there in the first place, and changed the VTIME to 0 and the VMIN to 1

@@ -57,7 +57,7 @@ int main(int argc, char** argv) {
                 } else {
 					if(trama_num == lastTrama) {
 						state = CONTROLEND;
-						closeFile();
+						fclose(file);
 					}
 					trama_num++;
 				}
@@ -471,10 +471,5 @@ void createFile() {
 		exit(-1);
 	}
 
-	return;
-}
-
-void closeFile() {
-	fclose(file);
 	return;
 }

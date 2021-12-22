@@ -9,10 +9,12 @@ int flag=1, timeout=1, trama_num = 1, lastTrama = -1, state = CONTROLSTART;
 
 int allFinished = FALSE;
 
+FILE *file;
+
 int lastDataPacketSize = -1;
 unsigned char lastDataPacketBCC2;
 
-unsigned char *fileName, *fileData;
+unsigned char *fileName;
 off_t fileSize, lastTramaSize;
 
 void takeAlarm() {
@@ -174,7 +176,10 @@ int main(int argc, char** argv) {
 						printf("REJ received, repeating CONTROLDATA\n");
 					} else {
 						printf("RR received successfully\n");
-						if(trama_num == lastTrama) state = CONTROLEND;
+						if(trama_num == lastTrama) {
+							state = CONTROLEND;
+							fclose(file);
+						}
 						trama_num++;
 					}
 					timeout = 1;
@@ -479,7 +484,8 @@ unsigned char *createDataPacket() {
 		toTransferSize = MINK;
 	}
 
-	memmove(tmp, fileData + ((trama_num - 2) * MINK), toTransferSize);
+	fread(tmp, sizeof(unsigned char), toTransferSize, file);
+
   for(int i = 0; i < toTransferSize; i++)
 		if(tmp[i] == FLAG || tmp[i] == ESCAPE) actualSize++;
 
@@ -517,7 +523,6 @@ unsigned char *createDataPacket() {
 
 void registerFileData(unsigned char *fname) {
 	fileName = fname;
-  FILE *file;
   struct stat st;
 
   if((file = fopen(fileName, "r")) == NULL) {
@@ -535,9 +540,4 @@ void registerFileData(unsigned char *fname) {
 	if(lastTramaSize > 0) lastTrama++;
 	else lastTramaSize = MINK;
 	lastTrama += 1;
-  fileData = malloc(fileSize);
-  if(fread(fileData, sizeof(unsigned char), fileSize, file) < fileSize) {
-    errorMsg("Failed to read file's data!");
-    exit(-1);
-  }
 }
