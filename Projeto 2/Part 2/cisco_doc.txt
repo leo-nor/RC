@@ -1,0 +1,28 @@
+2.a) Router name: gnu-rtr1
+
+2.b) Ethernet Ports Available: Fast-ethernet
+
+2.c) Configured IP addresses and netmask of ports:
+	FastEthernet0/0:
+		IP Address: 172.16.30.1
+		Subnet mask: 255.255.255.0
+		
+	FastEthernet0/1:
+		IP Address: 172.16.254.45
+		Subnet mask: 255.255.255.0
+
+2.d) Configured routes:
+	Route 1:
+		Destination IP address: 0.0.0.0
+		Subnet mask: 0.0.0.0
+		Routing address: 172.16.254.1
+	Route 2:
+		Destination IP address: 172.16.40.0
+		Subnet mask: 255.255.255.0
+		Routing address: 172.16.30.2
+		
+3.a) Interface connected to the Internet: Interface FastEthernet0/0
+
+3.b) IP addresses available for NATing: 1 single address
+
+3.c) Is router using overloading?: Yes, overload is being used
