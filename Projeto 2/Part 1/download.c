@@ -11,13 +11,20 @@
 #define TRUE 1
 #define ServerPort 21
 
+int debugMode = TRUE;
+
 enum Responses {
     SERVICE_READY,
-    
+    SPECIFY_PASSWORD,
+    LOGIN_DONE,
+    PASSIVE_MODE,
 };
 
 static const char * const ResponseCodes[] = {
 	[SERVICE_READY] = "220",
+	[SPECIFY_PASSWORD] = "331",
+	[LOGIN_DONE] = "230",
+	[PASSIVE_MODE] = "227",
 };
 
 enum AccessCommands {
@@ -108,6 +115,7 @@ enum Stages {
     ESTABLISH_CONNECTION = 1,
     SEND_USERNAME = 2,
     SEND_PASSWORD = 3,
+    GET_TRANSFER_PORT = 4,
 };
 
 typedef struct {
@@ -120,9 +128,7 @@ typedef struct {
     int transferPort;
 } FTPTask;
 
-int debugMode = TRUE;
-
-void processResp(int sockfd, FTPTask task, int stage);
+void processResp(int sockfd, FTPTask *task, int stage);
 void clearReading(int sockfd);
 FTPTask processArgument(char *argv[]);
 
@@ -130,7 +136,7 @@ int main(int argc, char *argv[]) {
     struct hostent *h;
     FTPTask task;
 
-    int sockfd;
+    int sockfd, respsockfd;
     struct sockaddr_in server_addr;
     struct sockaddr_in resp_addr;
     char respCode[3];
@@ -172,27 +178,53 @@ int main(int argc, char *argv[]) {
         exit(-1);
     }
 
-    processResp(sockfd, task, ESTABLISH_CONNECTION);
+    processResp(sockfd, &task, ESTABLISH_CONNECTION);
 
+    // Login process
     if(!task.isAnonymous) {
         printf(" > Sending Username\n");
         write(sockfd, AccessCommands[USER_NAME], strlen(AccessCommands[USER_NAME]));
         write(sockfd, " ", 1);
         write(sockfd, task.user, strlen(task.user));
         write(sockfd, "\n", 1);
-        processResp(sockfd, task, SEND_USERNAME);
+        processResp(sockfd, &task, SEND_USERNAME);
 
         printf(" > Sending Password\n");
         write(sockfd, AccessCommands[PASSWORD], strlen(AccessCommands[PASSWORD]));
         write(sockfd, " ", 1);
         write(sockfd, task.password, strlen(task.password));
         write(sockfd, "\n", 1);
-        processResp(sockfd, task, SEND_PASSWORD);
-
-        write(sockfd, ParameterCommands[PASSIVE], strlen(ParameterCommands[PASSIVE]));
-        write(sockfd, "\n", 1);
-        processResp(sockfd, task, ESTABLISH_CONNECTION);
+        processResp(sockfd, &task, SEND_PASSWORD);
     }
+
+    // Request and process data transfer port
+    write(sockfd, ParameterCommands[PASSIVE], strlen(ParameterCommands[PASSIVE]));
+    write(sockfd, "\n", 1);
+    processResp(sockfd, &task, GET_TRANSFER_PORT);
+
+    printf("Transfer port: %i\n", task.transferPort);
+
+    /*server address handling*/
+    bzero((char *) &resp_addr, sizeof(resp_addr));
+    resp_addr.sin_family = AF_INET;
+    resp_addr.sin_addr.s_addr = inet_addr(task.ip_addr);    /*32 bit Internet address network byte ordered*/
+    resp_addr.sin_port = htons(task.transferPort);        /*server TCP port must be network byte ordered */
+
+    /*open a TCP socket*/
+    if ((respsockfd = socket(AF_INET, SOCK_STREAM, 0)) < 0) {
+        perror("socket()");
+        exit(-1);
+    }
+    /*connect to the server*/
+    if (connect(respsockfd, (struct sockaddr *) &resp_addr, sizeof(resp_addr)) < 0) {
+        perror("connect()");
+        exit(-1);
+    }
+
+    // Request and process file
+    write(respsockfd, ParameterCommands[RETRIEVE], strlen(ParameterCommands[RETRIEVE]));
+    write(respsockfd, "\n", 1);
+    processResp(respsockfd, &task, GET_TRANSFER_PORT);
 
     /*send a string to the server*/
     bytes = write(sockfd, buf, strlen(buf));
@@ -280,14 +312,16 @@ FTPTask processArgument(char *argv[]) {
     return task;
 }
 
-void processResp(int sockfd, FTPTask task, int stage) {
+void processResp(int sockfd, FTPTask *task, int stage) {
 	char c;
-    unsigned char respCode[3] = "";
-    int stillReading = TRUE;
+    unsigned char respCode[3] = "", p1[4] = "", p2[4] = "";
+    int stillReading = TRUE, hasToProcess = FALSE;
+    int ignoreCommas = -4;
 
+    printf("Response: ");
     while(stillReading) {
         read(sockfd, &c, 1);
-		if(debugMode) printf("Char: %c\n", c);
+		if(debugMode) printf("%c", c);
 
         switch (stage) {
             case ESTABLISH_CONNECTION:
@@ -303,11 +337,57 @@ void processResp(int sockfd, FTPTask task, int stage) {
                     stillReading = FALSE;
                 }
                 break;
-            case SEND_USERNAME: // Process response code
-                stillReading = FALSE;
+            case SEND_USERNAME:
+                if(strlen(respCode) < 3) {
+                    respCode[strlen(respCode)] = c;
+                } else {
+                    if(debugMode) printf("Response code: %s\n", respCode);
+                    if(strcmp(respCode, ResponseCodes[SPECIFY_PASSWORD])) {
+                        printf("Failed to receive valid response to username!\n");
+                        exit(-1);
+                    }
+                    stillReading = FALSE;
+                }
                 break;
-            case SEND_PASSWORD: // Process response code
-                stillReading = FALSE;
+            case SEND_PASSWORD:
+                if(strlen(respCode) < 3) {
+                    respCode[strlen(respCode)] = c;
+                } else {
+                    if(debugMode) printf("Response code: %s\n", respCode);
+                    if(!strcmp(respCode, ResponseCodes[LOGIN_DONE])) printf("Login process sucessful\n");
+                    else {
+                        printf("Failed to receive valid response to password!\n");
+                        exit(-1);
+                    }
+                    stillReading = FALSE;
+                }
+                break;
+            case GET_TRANSFER_PORT:
+                if(!hasToProcess) {
+                    if(strlen(respCode) < 3) {
+                        respCode[strlen(respCode)] = c;
+                    } else {
+                        if(debugMode) printf("Response code: %s\n", respCode);
+                        if(!strcmp(respCode, ResponseCodes[PASSIVE_MODE])) printf("Entered passive mode\n");
+                        else {
+                            printf("Failed to receive valid response to passive mode request!\n");
+                            exit(-1);
+                        }
+                        hasToProcess = TRUE;
+                    }
+                } else {
+                    if(c == ')') {
+                        task->transferPort = atoi(p1) * 256 + atoi(p2);
+                        stillReading = FALSE;
+                    } else {
+                        if(c == ',')
+                            ignoreCommas++;
+                        else if(ignoreCommas == 0)
+                            p1[strlen(p1)] = c;
+                        else if(ignoreCommas == 1)
+                            p2[strlen(p2)] = c;
+                    }
+                }
                 break;
             default:
                 fprintf(stderr, "Error: Invalid stage given!\n");
@@ -321,8 +401,9 @@ void processResp(int sockfd, FTPTask task, int stage) {
 
 void clearReading(int sockfd) {
 	char c;
+    printf("Response: ");
     do {
         read(sockfd, &c, 1);
-		if(debugMode) printf("Char: %c\n", c);
+		if(debugMode) printf("%c", c);
     } while(c != '\n');
 }
