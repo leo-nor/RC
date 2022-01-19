@@ -10,6 +10,7 @@
 #define FALSE 0
 #define TRUE 1
 #define ServerPort 21
+#define MAX_FILE_SIZE 100000
 
 int debugMode = TRUE;
 
@@ -18,6 +19,7 @@ enum Responses {
     SPECIFY_PASSWORD,
     LOGIN_DONE,
     PASSIVE_MODE,
+    SENDING_FILE,
 };
 
 static const char * const ResponseCodes[] = {
@@ -25,6 +27,7 @@ static const char * const ResponseCodes[] = {
 	[SPECIFY_PASSWORD] = "331",
 	[LOGIN_DONE] = "230",
 	[PASSIVE_MODE] = "227",
+	[SENDING_FILE] = "150",
 };
 
 enum AccessCommands {
@@ -116,21 +119,25 @@ enum Stages {
     SEND_USERNAME = 2,
     SEND_PASSWORD = 3,
     GET_TRANSFER_PORT = 4,
+    GET_FILE = 5
 };
 
 typedef struct {
     unsigned char *user;
     unsigned char *password;
     unsigned char *url_path;
+    unsigned char *file_name;
     unsigned char *host;
     unsigned char *ip_addr;
     int isAnonymous;
     int transferPort;
+    int respsockfd;
 } FTPTask;
 
 void processResp(int sockfd, FTPTask *task, int stage);
 void clearReading(int sockfd);
 FTPTask processArgument(char *argv[]);
+void receiveFile(FTPTask *task);
 
 int main(int argc, char *argv[]) {
     struct hostent *h;
@@ -221,21 +228,17 @@ int main(int argc, char *argv[]) {
         exit(-1);
     }
 
+    task.respsockfd = respsockfd;
+
     // Request and process file
-    write(respsockfd, ParameterCommands[RETRIEVE], strlen(ParameterCommands[RETRIEVE]));
-    write(respsockfd, "\n", 1);
-    processResp(respsockfd, &task, GET_TRANSFER_PORT);
+    printf("%s %s\n", ServiceCommands[RETRIEVE], task.url_path);
+    write(sockfd, ServiceCommands[RETRIEVE], strlen(ServiceCommands[RETRIEVE]));
+    write(sockfd, " ", 1);
+    write(sockfd, task.url_path, strlen(task.url_path));
+    write(sockfd, "\n", 1);
+    processResp(sockfd, &task, GET_FILE);
 
-    /*send a string to the server*/
-    bytes = write(sockfd, buf, strlen(buf));
-    if (bytes > 0)
-        printf("Bytes escritos %ld\n", bytes);
-    else {
-        perror("write()");
-        exit(-1);
-    }
-
-    if (close(sockfd)<0) {
+    if (close(sockfd)<0 || close(respsockfd)<0) {
         perror("close()");
         exit(-1);
     }
@@ -244,7 +247,7 @@ int main(int argc, char *argv[]) {
 }
 
 FTPTask processArgument(char *argv[]) {
-    unsigned char *tmp, *end, *host, *url_path, *user, *password = NULL;
+    unsigned char *tmp, *end, *host, *url_path, *file_name, *user, *password = NULL;
     int isAnonymous = TRUE;
 
     FTPTask task;
@@ -303,11 +306,20 @@ FTPTask processArgument(char *argv[]) {
         fprintf(stderr, "Usage: %s ftp://[<user>:<password>@]<host>/<url-path>\n", argv[0]);
         exit(-1);
     }
+        
+    file_name = strstr(tmp, "/");
+
+    do {
+        file_name = strstr(file_name, "/") + 1;
+    } while(strstr(file_name, "/") > 0);
+
+    if(debugMode) if (file_name) printf("Filename: %s\n", file_name);
 
     task.host = host;
     task.user = user;
     task.password = password;
     task.url_path = url_path;
+    task.file_name = file_name;
 
     return task;
 }
@@ -389,6 +401,21 @@ void processResp(int sockfd, FTPTask *task, int stage) {
                     }
                 }
                 break;
+            case GET_FILE:
+                if(strlen(respCode) < 3) {
+                    respCode[strlen(respCode)] = c;
+                } else {
+                    if(debugMode) printf("Response code: %s\n", respCode);
+                    if(strcmp(respCode, ResponseCodes[SENDING_FILE])) {
+                        printf("Failed to receive valid response to file request!\n");
+                        exit(-1);
+                    } else {
+                        receiveFile(task);
+                        return;
+                    }
+                    stillReading = FALSE;
+                }
+                break;
             default:
                 fprintf(stderr, "Error: Invalid stage given!\n");
                 exit(-1);
@@ -399,9 +426,22 @@ void processResp(int sockfd, FTPTask *task, int stage) {
     clearReading(sockfd);
 }
 
+void receiveFile(FTPTask *task) {
+    FILE *file = fopen((char *) task->file_name, "wb+");
+
+	char bufSocket[MAX_FILE_SIZE];
+ 	int bytes;
+ 	while ((bytes = read(task->respsockfd, bufSocket, MAX_FILE_SIZE))>0) {
+    	bytes = fwrite(bufSocket, bytes, 1, file);
+    }
+
+  	fclose(file);
+
+	printf("Finished downloading %s from %s!\n", task->file_name, task->host);
+}
+
 void clearReading(int sockfd) {
 	char c;
-    printf("Response: ");
     do {
         read(sockfd, &c, 1);
 		if(debugMode) printf("%c", c);
