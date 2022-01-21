@@ -10,7 +10,7 @@
 #define FALSE 0
 #define TRUE 1
 #define ServerPort 21
-#define MAX_FILE_SIZE 100000
+#define MAX_FILE_SIZE 1000000
 
 int debugMode = TRUE;
 
@@ -33,85 +33,27 @@ static const char * const ResponseCodes[] = {
 enum AccessCommands {
     USER_NAME,
     PASSWORD,
-    ACCOUNT,
-    CHANGE_WORKING_DIRECTORY,
-    CHANGE_TO_PARENT_DIRECTORY,
-    STRUCTURE_MOUNT,
-    REINITIALIZE,
-    LOGOUT,
 };
 
 static const char * const AccessCommands[] = {
 	[USER_NAME] = "USER",
 	[PASSWORD] = "PASS",
-	[ACCOUNT] = "ACCT",
-	[CHANGE_WORKING_DIRECTORY] = "CWD",
-	[CHANGE_TO_PARENT_DIRECTORY] = "CDUP",
-	[STRUCTURE_MOUNT] = "SMNT",
-	[REINITIALIZE] = "REIN",
-	[LOGOUT] = "QUIT",
 };
 
 enum ParameterCommands {
-    DATA_PORT,
     PASSIVE,
-    REPRESENTATION_TYPE,
-    FILE_STRUCTURE,
-    TRANSFER_MODE,
 };
 
 static const char * const ParameterCommands[] = {
-	[DATA_PORT] = "PORT",
 	[PASSIVE] = "PASV",
-	[REPRESENTATION_TYPE] = "TYPE",
-	[FILE_STRUCTURE] = "STRU",
-	[TRANSFER_MODE] = "MODE",
 };
 
 enum ServiceCommands {
     RETRIEVE,
-    STORE,
-    STORE_UNIQUE,
-    APPEND,
-    ALLOCATE,
-    RESTART,
-    RENAME_FROM,
-    RENAME_TO,
-    ABORT,
-    DELETE,
-    REMOVE_DIRECTORY,
-    MAKE_DIRECTORY,
-    PRINT_WORKING_DIRECTORY,
-    LIST,
-    NAME_LIST,
-    SITE_PARAMETERS,
-    SYSTEM,
-    STATUS,
-    HELP,
-    NOOP,
 };
 
 static const char * const ServiceCommands[] = {
     [RETRIEVE] = "RETR",
-    [STORE] = "STOR",
-    [STORE_UNIQUE] = "STOU",
-    [APPEND] = "APPE",
-    [ALLOCATE] = "ALLO",
-    [RESTART] = "REST",
-    [RENAME_FROM] = "RNFR",
-    [RENAME_TO] = "RNTO",
-    [ABORT] = "ABOR",
-    [DELETE] = "DELE",
-    [REMOVE_DIRECTORY] = "RMD",
-    [MAKE_DIRECTORY] = "MKD",
-    [PRINT_WORKING_DIRECTORY] = "PWD",
-    [LIST] = "LIST",
-    [NAME_LIST] = "NLST",
-    [SITE_PARAMETERS] = "SITE",
-    [SYSTEM] = "SYST",
-    [STATUS] = "STAT",
-    [HELP] = "HELP",
-    [NOOP] = "NOOP",
 };
 
 enum Stages {
