@@ -12,22 +12,26 @@
 #define ServerPort 21
 #define MAX_FILE_SIZE 1000000
 
-int debugMode = TRUE;
+int debugMode = FALSE;
 
 enum Responses {
     SERVICE_READY,
     SPECIFY_PASSWORD,
     LOGIN_DONE,
+    LOGIN_FAILED,
     PASSIVE_MODE,
     SENDING_FILE,
+    FILE_UNAVALIABLE,
 };
 
 static const char * const ResponseCodes[] = {
 	[SERVICE_READY] = "220",
 	[SPECIFY_PASSWORD] = "331",
 	[LOGIN_DONE] = "230",
+    [LOGIN_FAILED] = "530",
 	[PASSIVE_MODE] = "227",
 	[SENDING_FILE] = "150",
+    [FILE_UNAVALIABLE] = "550",
 };
 
 enum AccessCommands {
@@ -108,7 +112,7 @@ int main(int argc, char *argv[]) {
 
     task.ip_addr = inet_ntoa(*((struct in_addr *) h->h_addr_list[0]));
 
-    if(debugMode) printf("\nIP Address: %s\n", task.ip_addr);
+    if(debugMode) printf("IP Address: %s\n\n", task.ip_addr);
 
     /*server address handling*/
     bzero((char *) &server_addr, sizeof(server_addr));
@@ -126,32 +130,47 @@ int main(int argc, char *argv[]) {
         perror("connect()");
         exit(-1);
     }
-
+    
+    printf("> Establishing connection\n");
     processResp(sockfd, &task, ESTABLISH_CONNECTION);
 
     // Login process
     if(!task.isAnonymous) {
-        printf(" > Sending Username\n");
+        printf("> Sending Username\n");
         write(sockfd, AccessCommands[USER_NAME], strlen(AccessCommands[USER_NAME]));
         write(sockfd, " ", 1);
         write(sockfd, task.user, strlen(task.user));
         write(sockfd, "\n", 1);
         processResp(sockfd, &task, SEND_USERNAME);
 
-        printf(" > Sending Password\n");
+        printf("> Sending Password\n");
         write(sockfd, AccessCommands[PASSWORD], strlen(AccessCommands[PASSWORD]));
         write(sockfd, " ", 1);
         write(sockfd, task.password, strlen(task.password));
         write(sockfd, "\n", 1);
         processResp(sockfd, &task, SEND_PASSWORD);
+    } else {
+        printf("> Logging in anonymously\n");
+        write(sockfd, AccessCommands[USER_NAME], strlen(AccessCommands[USER_NAME]));
+        write(sockfd, " ", 1);
+        write(sockfd, "anonymous", strlen("anonymous"));
+        write(sockfd, "\n", 1);
+        processResp(sockfd, &task, SEND_USERNAME);
+
+        write(sockfd, AccessCommands[PASSWORD], strlen(AccessCommands[PASSWORD]));
+        write(sockfd, " ", 1);
+        write(sockfd, "a", 1);
+        write(sockfd, "\n", 1);
+        processResp(sockfd, &task, SEND_PASSWORD);
     }
 
     // Request and process data transfer port
+    printf("> Requesting port for file transfer\n");
     write(sockfd, ParameterCommands[PASSIVE], strlen(ParameterCommands[PASSIVE]));
     write(sockfd, "\n", 1);
     processResp(sockfd, &task, GET_TRANSFER_PORT);
 
-    printf("Transfer port: %i\n", task.transferPort);
+    printf("< Transfer port: %i\n", task.transferPort);
 
     /*server address handling*/
     bzero((char *) &resp_addr, sizeof(resp_addr));
@@ -173,7 +192,7 @@ int main(int argc, char *argv[]) {
     task.respsockfd = respsockfd;
 
     // Request and process file
-    printf("%s %s\n", ServiceCommands[RETRIEVE], task.url_path);
+    printf("> Retrieving file %s\n", task.file_name);
     write(sockfd, ServiceCommands[RETRIEVE], strlen(ServiceCommands[RETRIEVE]));
     write(sockfd, " ", 1);
     write(sockfd, task.url_path, strlen(task.url_path));
@@ -272,7 +291,7 @@ void processResp(int sockfd, FTPTask *task, int stage) {
     int stillReading = TRUE, hasToProcess = FALSE;
     int ignoreCommas = -4;
 
-    printf("Response: ");
+    if(stage != SEND_USERNAME) printf("< ");
     while(stillReading) {
         read(sockfd, &c, 1);
 		if(debugMode) printf("%c", c);
@@ -286,6 +305,7 @@ void processResp(int sockfd, FTPTask *task, int stage) {
                     if(!strcmp(respCode, ResponseCodes[SERVICE_READY])) printf("Connection to server established sucessfully\n");
                     else {
                         printf("Connection to server failed!\n");
+                        printf("< Error code: %s\n", respCode);
                         exit(-1);
                     }
                     stillReading = FALSE;
@@ -298,6 +318,7 @@ void processResp(int sockfd, FTPTask *task, int stage) {
                     if(debugMode) printf("Response code: %s\n", respCode);
                     if(strcmp(respCode, ResponseCodes[SPECIFY_PASSWORD])) {
                         printf("Failed to receive valid response to username!\n");
+                        printf("< Error code: %s\n", respCode);
                         exit(-1);
                     }
                     stillReading = FALSE;
@@ -310,7 +331,12 @@ void processResp(int sockfd, FTPTask *task, int stage) {
                     if(debugMode) printf("Response code: %s\n", respCode);
                     if(!strcmp(respCode, ResponseCodes[LOGIN_DONE])) printf("Login process sucessful\n");
                     else {
-                        printf("Failed to receive valid response to password!\n");
+                        if(!strcmp(respCode, ResponseCodes[LOGIN_FAILED])) {
+                            printf("Login failed, credentials might be wrong!\n");
+                        } else {
+                            printf("Failed to receive valid response to password!\n");
+                            printf("< Error code: %s\n", respCode);
+                        }
                         exit(-1);
                     }
                     stillReading = FALSE;
@@ -325,6 +351,7 @@ void processResp(int sockfd, FTPTask *task, int stage) {
                         if(!strcmp(respCode, ResponseCodes[PASSIVE_MODE])) printf("Entered passive mode\n");
                         else {
                             printf("Failed to receive valid response to passive mode request!\n");
+                            printf("< Error code: %s\n", respCode);
                             exit(-1);
                         }
                         hasToProcess = TRUE;
@@ -349,7 +376,13 @@ void processResp(int sockfd, FTPTask *task, int stage) {
                 } else {
                     if(debugMode) printf("Response code: %s\n", respCode);
                     if(strcmp(respCode, ResponseCodes[SENDING_FILE])) {
-                        printf("Failed to receive valid response to file request!\n");
+                        if(!strcmp(respCode, ResponseCodes[FILE_UNAVALIABLE])) {
+                            printf("File request failed, file is unavaliable or does not exist!\n");
+                        } else {
+                            printf("Failed to receive valid response to file request!\n");
+                            printf("< Error code: %s\n", respCode);
+                        }
+                        exit(-1);
                         exit(-1);
                     } else {
                         receiveFile(task);
